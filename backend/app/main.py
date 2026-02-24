@@ -1,8 +1,23 @@
-# This is the main entry point for the FastAPI application. It defines the app and includes a simple route for testing.
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from app.api.routes import video
 
-app = FastAPI()
+app = FastAPI(title="VidSage API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(video.router)
 
 @app.get("/")
-def read_root():
-    return {"message": "Hello World"}
+async def root():
+    return {"message": "VidSage API running"}
+
+@app.get("/health")
+async def health():
+    return {"status": "healthy"}
