@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.routes import video
+from app.api.routes import video, transcription
 
 app = FastAPI(title="VidSage API")
 
@@ -12,11 +12,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Routers
 app.include_router(video.router)
+app.include_router(transcription.router)
+
 
 @app.get("/")
 async def root():
     return {"message": "VidSage API running"}
+
 
 @app.get("/health")
 async def health():
