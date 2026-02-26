@@ -1,4 +1,9 @@
-from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api import (
+    YouTubeTranscriptApi,
+    NoTranscriptFound,
+    TranscriptsDisabled,
+    VideoUnavailable
+)
 import logging
 
 logger = logging.getLogger(__name__)
@@ -6,54 +11,75 @@ logger = logging.getLogger(__name__)
 
 class YouTubeTranscriptService:
 
-    # Preferred languages for manual transcripts (in priority order)
     PREFERRED_LANGUAGES = ['en', 'hi', 'es', 'de', 'fr', 'ja', 'pt', 'zh', 'ko', 'ru', 'ar']
 
     @staticmethod
     def fetch_transcript(video_id: str):
+
         try:
-            print(f"🔍 Checking YouTube transcript for video: {video_id}")
-            
-            # New API requires instantiation
+            logger.info(f"Checking YouTube transcript for video: {video_id}")
+
             api = YouTubeTranscriptApi()
             transcript_list = api.list(video_id)
 
-            # Log available transcripts
-            print(f"📊 Available transcripts:")
-            for transcript in transcript_list:
-                print(f"  Language: {transcript.language_code}, Manual: {not transcript.is_generated}, Generated: {transcript.is_generated}")
+            manual_transcripts = [
+                t for t in transcript_list if not t.is_generated
+            ]
 
-            # 1️ Try to find manually created transcript
-            for transcript in transcript_list:
-                if not transcript.is_generated:
-                    print(f"✅ Found MANUAL transcript: {transcript.language_code}")
-                    segments_raw = transcript.fetch()
-                    
-                    # New API returns objects, not dicts - convert to dict format
-                    segments = [
-                        {
-                            "text": s.text,
-                            "start": s.start,
-                            "duration": s.duration
-                        }
-                        for s in segments_raw
-                    ]
-                    
-                    full_text = " ".join(s["text"] for s in segments)
+            auto_transcripts = [
+                t for t in transcript_list if t.is_generated
+            ]
 
-                    return {
-                        "success": True,
-                        "source": "youtube_manual",
-                        "language": transcript.language_code,
-                        "text": full_text,
-                        "segments": segments
-                    }
+            # 1️ Try manual transcript with language priority
+            for lang in YouTubeTranscriptService.PREFERRED_LANGUAGES:
+                for t in manual_transcripts:
+                    if t.language_code.startswith(lang):
+                        logger.info(f"Using MANUAL transcript ({t.language_code})")
+                        return YouTubeTranscriptService._format_transcript(t)
 
-            # 2️ No manual transcript available → Whisper will handle it
-            print(f"❌ No MANUAL transcript found for {video_id} → Falling back to Whisper")
+            # 2️ If manual exists but not preferred language
+            if manual_transcripts:
+                logger.info(f"Using MANUAL transcript ({manual_transcripts[0].language_code})")
+                return YouTubeTranscriptService._format_transcript(manual_transcripts[0])
+
+            # 3️ Try auto transcript (fast fallback)
+            for lang in YouTubeTranscriptService.PREFERRED_LANGUAGES:
+                for t in auto_transcripts:
+                    if t.language_code.startswith(lang):
+                        logger.info(f"Using AUTO transcript ({t.language_code})")
+                        return YouTubeTranscriptService._format_transcript(t)
+
+            # 4️ If nothing usable
+            logger.info(f"No usable transcript found for {video_id}")
+            return {"success": False}
+
+        except (NoTranscriptFound, TranscriptsDisabled, VideoUnavailable):
+            logger.info(f"No transcript available for video {video_id}")
             return {"success": False}
 
         except Exception as e:
-            print(f"⚠️ Error fetching YouTube transcript: {str(e)}")
-            logger.error(f"YouTube transcript error for {video_id}: {str(e)}")
+            logger.error(f"Unexpected YouTube transcript error for {video_id}: {e}")
             return {"success": False}
+
+    @staticmethod
+    def _format_transcript(transcript):
+        segments_raw = transcript.fetch()
+
+        segments = [
+            {
+                "text": s.text,
+                "start": s.start,
+                "duration": s.duration
+            }
+            for s in segments_raw
+        ]
+
+        full_text = " ".join(s["text"] for s in segments)
+
+        return {
+            "success": True,
+            "source": "youtube_manual" if not transcript.is_generated else "youtube_auto",
+            "language": transcript.language_code,
+            "text": full_text,
+            "segments": segments
+        }

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs,unquote
 
 from app.models.video_models import VideoRequest
 from app.services.video_downloader import VideoDownloaderService
@@ -17,34 +17,43 @@ transcription_service = TranscriptionService()
 def extract_video_id(url: str):
     try:
         parsed = urlparse(url)
+        netloc = parsed.netloc.lower()
+        path = parsed.path
 
-        # youtu.be short links
-        if "youtu.be" in parsed.netloc:
-            parts = parsed.path.strip("/").split("/")
-            return parts[0] if parts and parts[0] else None
+        #  1️ Handle attribution links ---
+        if "attribution_link" in path:
+            query = parse_qs(parsed.query)
+            if "u" in query:
+                decoded_url = unquote(query["u"][0])
+                return extract_video_id(decoded_url)
 
-        # youtube.com links
-        if "youtube.com" in parsed.netloc:
+        #  2️ Handle youtu.be short links ---
+        if "youtu.be" in netloc:
+            return path.strip("/").split("/")[0]
+
+        #  3️ Handle all youtube domains ---
+        if any(domain in netloc for domain in [
+            "youtube.com",
+            "m.youtube.com",
+            "music.youtube.com",
+            "gaming.youtube.com"
+        ]):
 
             # Standard watch URL
-            if parsed.path == "/watch":
-                return parse_qs(parsed.query).get("v", [None])[0]
+            query = parse_qs(parsed.query)
+            if "v" in query:
+                return query["v"][0]
 
-            # Shorts URL
-            if parsed.path.startswith("/shorts/"):
-                parts = parsed.path.split("/")
-                return parts[2] if len(parts) > 2 else None
+            # Path-based formats
+            parts = path.strip("/").split("/")
 
-            # Embed URL
-            if parsed.path.startswith("/embed/"):
-                parts = parsed.path.split("/")
-                return parts[2] if len(parts) > 2 else None
+            if parts[0] in ["live", "embed", "v", "shorts"]:
+                return parts[1] if len(parts) > 1 else None
 
         return None
 
     except Exception:
         return None
-
 
 @router.post("/download")
 async def download_video(request: VideoRequest):
