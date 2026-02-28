@@ -5,6 +5,7 @@ from app.models.video_models import VideoRequest
 from app.services.video_downloader import VideoDownloaderService
 from app.services.youtube_transcript_service import YouTubeTranscriptService
 from app.services.transcription_service import TranscriptionService
+from app.services.transcript_cleaner import TranscriptCleaner
 
 
 router = APIRouter(prefix="/api/video", tags=["Video Operations"])
@@ -69,11 +70,20 @@ async def download_video(request: VideoRequest):
         youtube_result = YouTubeTranscriptService.fetch_transcript(video_id)
 
         if youtube_result.get("success"):
+            # Manual transcripts are already accurate — skip expensive LLM cleaning
+            is_manual = youtube_result.get("source") == "youtube_manual"
+            cleaned = TranscriptCleaner.clean(
+                youtube_result["text"],
+                use_llm=not is_manual  # LLM only for auto-generated
+            )
+
             return {
                 "success": True,
-                "source": "youtube_manual",
+                "source": youtube_result.get("source", "youtube"),
                 "video_id": video_id,
-                "text": youtube_result["text"],
+                "raw_text": youtube_result["text"],
+                "cleaned_text": cleaned["cleaned_text"],
+                "cleaning_steps": cleaned["cleaning_steps"],
                 "segments": youtube_result["segments"]
             }
 
@@ -91,11 +101,16 @@ async def download_video(request: VideoRequest):
             audio_path=download_result["file_path"]
         )
 
+        # 5️ Clean the transcript
+        cleaned = TranscriptCleaner.clean(whisper_result.text)
+
         return {
             "success": True,
             "source": "whisper",
             "video_id": video_id,
-            "text": whisper_result.text,
+            "raw_text": whisper_result.text,
+            "cleaned_text": cleaned["cleaned_text"],
+            "cleaning_steps": cleaned["cleaning_steps"],
             "segments": [
                 {
                     "start": s.start,
