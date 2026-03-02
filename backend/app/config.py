@@ -26,7 +26,7 @@ class Settings:
 
     # Cleaning settings
     CLEANING_MODEL: str = os.getenv("CLEANING_MODEL", "llama-3.1-8b-instant")
-    MAX_CHUNK_SIZE: int = 3000  # characters per LLM chunk
+    MAX_CHUNK_SIZE: int = 2500  # characters per LLM chunk (reduced slightly for rate limits)
 
 
 settings = Settings()

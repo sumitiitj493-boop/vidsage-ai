@@ -9,8 +9,9 @@ Three-layer cleaning pipeline:
 
 import re
 import logging
+import asyncio
 from typing import Optional, List, Dict
-from groq import Groq
+from groq import AsyncGroq
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 class TranscriptCleaner:
 
-    # ================= LAYER 1: BASIC CLEANING =================
+    #LAYER 1: BASIC CLEANING 
 
     # Filler words to remove
     FILLER_WORDS = [
@@ -150,41 +151,54 @@ Corrected transcript:
         return chunks
 
     @staticmethod
-    def llm_clean(text: str) -> str:
+    async def llm_clean(text: str) -> str:
         """
-        Layer 3: Use Groq LLM to fix context-dependent errors
-        (proper nouns, place names, technical terms)
+        Layer 3: Use Groq LLM to fix context-dependent errors.
+        Now uses AsyncGroq + Semaphore to throttle requests and avoid Rate Limits.
         """
         if not settings.GROQ_API_KEY:
             logger.warning("GROQ_API_KEY not set — skipping LLM cleaning")
             return text
 
         try:
-            client = Groq(api_key=settings.GROQ_API_KEY)
+            client = AsyncGroq(api_key=settings.GROQ_API_KEY)
             chunks = TranscriptCleaner._chunk_text(text, settings.MAX_CHUNK_SIZE)
-            cleaned_chunks = []
+            
+            logger.info(f"Starting LLM cleaning for {len(chunks)} chunks (Throttled)...")
 
-            for i, chunk in enumerate(chunks):
-                logger.info(f"LLM cleaning chunk {i+1}/{len(chunks)}")
+            # Limit to 2 concurrent requests to stay under 6,000 TPM limit
+            sem = asyncio.Semaphore(2) 
 
-                response = client.chat.completions.create(
-                    model=settings.CLEANING_MODEL,
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": "You are a precise transcript editor. Only fix errors, never change meaning."
-                        },
-                        {
-                            "role": "user",
-                            "content": TranscriptCleaner.CLEANING_PROMPT.format(text=chunk)
-                        }
-                    ],
-                    temperature=0.1,  # Low temperature = more precise, less creative
-                    max_tokens=4096,
-                )
+            async def process_chunk(chunk, index):
+                async with sem:
+                    # Retry logic for 429 errors
+                    for attempt in range(3):
+                        try:
+                            response = await client.chat.completions.create(
+                                model=settings.CLEANING_MODEL,
+                                messages=[
+                                    {"role": "system", "content": "You are a precise transcript editor. Only fix errors."},
+                                    {"role": "user", "content": TranscriptCleaner.CLEANING_PROMPT.format(text=chunk)}
+                                ],
+                                temperature=0.1,
+                                max_tokens=4096,
+                            )
+                            cleaned = response.choices[0].message.content.strip()
+                            logger.info(f"Chunk {index+1}/{len(chunks)} cleaned.")
+                            return cleaned
+                        except Exception as e:
+                            if "429" in str(e) and attempt < 2:
+                                wait_time = 5 * (attempt + 1)
+                                logger.warning(f"Rate limit detected on chunk {index+1}. Retrying in {wait_time}s...")
+                                await asyncio.sleep(wait_time)
+                                continue
+                            
+                            logger.error(f"Error cleaning chunk {index+1}: {e}")
+                            return chunk  # Return original if failed final attempt
 
-                cleaned = response.choices[0].message.content.strip()
-                cleaned_chunks.append(cleaned)
+            # Launch all tasks (controlled by semaphore)
+            tasks = [process_chunk(chunk, i) for i, chunk in enumerate(chunks)]
+            cleaned_chunks = await asyncio.gather(*tasks)
 
             return " ".join(cleaned_chunks)
 
@@ -195,7 +209,7 @@ Corrected transcript:
     # FULL PIPELINE 
 
     @staticmethod
-    def clean(
+    async def clean(
         text: str,
         use_basic: bool = True,
         use_dictionary: bool = True,
@@ -207,7 +221,6 @@ Corrected transcript:
         """
 
         result = {
-            "raw_text": text,
             "cleaned_text": text,
             "cleaning_steps": []
         }
@@ -222,9 +235,9 @@ Corrected transcript:
             result["cleaned_text"] = TranscriptCleaner.apply_dictionary(result["cleaned_text"])
             result["cleaning_steps"].append("dictionary")
 
-        # Layer 3: LLM cleaning
+        # Layer 3: LLM cleaning (Now Async!)
         if use_llm:
-            result["cleaned_text"] = TranscriptCleaner.llm_clean(result["cleaned_text"])
+            result["cleaned_text"] = await TranscriptCleaner.llm_clean(result["cleaned_text"])
             result["cleaning_steps"].append("llm")
 
         return result
