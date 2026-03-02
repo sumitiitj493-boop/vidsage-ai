@@ -8,7 +8,8 @@ Flow: Upload file -> get job_id -> poll status -> fetch result
 from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks
 from datetime import datetime
 from app.services.audio_uploader import audio_uploader_service
-from app.services.transcription_service import TranscriptionService
+# from app.services.transcription_service import TranscriptionService # Removed
+from app.api.deps import transcription_service
 from app.services.transcript_cleaner import TranscriptCleaner
 from app.services.job_manager import job_manager
 
@@ -19,7 +20,7 @@ router = APIRouter(
 )
 
 # Load once at startup — loading inside a route would be too slow
-transcription_service = TranscriptionService()
+# transcription_service = TranscriptionService() # Removed local init
 
 
 def process_transcription(job_id: str):

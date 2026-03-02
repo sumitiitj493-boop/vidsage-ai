@@ -4,17 +4,19 @@ from app.models.transcription_models import (
     TranscribeResponse,
     SegmentResponse
 )
-from app.services.transcription_service import TranscriptionService
+# from app.services.transcription_service import TranscriptionService # Removed local import
+from app.api.deps import transcription_service
 
 router = APIRouter(prefix="/transcribe", tags=["Transcription"])
 
-transcription_service = TranscriptionService(model_size="base")
+# transcription_service = TranscriptionService(model_size="base") # Removed local init
 
 
 @router.post("/", response_model=TranscribeResponse)
 async def transcribe_audio(request: TranscribeRequest):
 
     try:
+        # Use singleton
         result = transcription_service.transcribe(
             audio_path=request.audio_path,
             language=request.language
