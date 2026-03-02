@@ -54,7 +54,18 @@ class VideoDownloaderService:
             "file_size": file_size,
         }
 
+    @staticmethod
+    def get_video_title(url: str) -> str:
+        """Fetch video title using yt-dlp without downloading."""
+        try:
+            with yt_dlp.YoutubeDL({'quiet': True, 'skip_download': True}) as ydl:
+                info = ydl.extract_info(url, download=False)
+                return info.get('title', 'Unknown Video')
+        except Exception:
+            return "Unknown Video"
+
     def _get_file_size(self, file_path: Path) -> str:
+
         if not file_path.exists():
             return "Unknown"
 
