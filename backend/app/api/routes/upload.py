@@ -6,12 +6,14 @@ Flow: Upload file -> get job_id -> poll status -> fetch result
 """
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks
+from starlette.concurrency import run_in_threadpool
 from datetime import datetime
 from app.services.audio_uploader import audio_uploader_service
 # from app.services.transcription_service import TranscriptionService # Removed
 from app.api.deps import transcription_service
 from app.services.transcript_cleaner import TranscriptCleaner
 from app.services.job_manager import job_manager
+from app.services.rag_service import rag_service # Import RAG service
 
 
 router = APIRouter(
@@ -23,7 +25,7 @@ router = APIRouter(
 # transcription_service = TranscriptionService() # Removed local init
 
 
-def process_transcription(job_id: str):
+async def process_transcription(job_id: str):
     """Runs in the background after upload. Transcribes and cleans the audio."""
 
     try:
@@ -33,13 +35,26 @@ def process_transcription(job_id: str):
 
         job_manager.update_status(job_id, "processing")
 
-        result = transcription_service.transcribe(job["file_path"])
-        cleaned = TranscriptCleaner.clean(result.text)
+        # Run blocking transcription in a separate thread to avoid blocking the event loop
+        result = await run_in_threadpool(transcription_service.transcribe, job["file_path"])
+        
+        # Clean the transcript (Async)
+        # We disable LLM cleaning here to keep the "offline/local" promise by default, 
+        # but you can enable it if you want Groq cleaning for uploads too.
+        cleaned = await TranscriptCleaner.clean(result.text, use_llm=False)
 
         segments_data = [
             {"start": s.start, "end": s.end, "text": s.text}
             for s in result.segments
         ]
+
+        # 4. RAG Indexing (Important Step for "Chat with Audio")
+        # For uploaded files, the JOB_ID becomes the "VIDEO_ID"
+        try:
+           # We now index SEGMENTS to support timestamps
+           rag_service.index_video(job_id, segments_data)
+        except Exception as e:
+           print(f"RAG Indexing Error for upload {job_id}: {e}")
 
         job_manager.complete_job(job_id, {
             "raw_text": result.text,
@@ -90,12 +105,17 @@ async def get_status(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    return {
+    response = {
         "job_id": job_id,
         "status": job["status"],
         "created_at": job["created_at"],
-        "completed_at": job["completed_at"]
+        "completed_at": job["completed_at"],
     }
+
+    if job.get("error"):
+        response["error"] = job["error"]
+        
+    return response
 
 
 @router.get("/result/{job_id}")

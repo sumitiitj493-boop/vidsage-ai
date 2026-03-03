@@ -9,7 +9,7 @@ from app.services.youtube_transcript_service import YouTubeTranscriptService
 from app.api.deps import transcription_service
 from app.services.transcript_cleaner import TranscriptCleaner
 from app.services.transcript_quality_checker import TranscriptQualityChecker
-
+from app.services.rag_service import rag_service  # When a video is successfully processed, we want to immediately save it to the RAG vector database.
 
 router = APIRouter(prefix="/api/video", tags=["Video Operations"])
 logger = logging.getLogger(__name__)
@@ -87,6 +87,9 @@ async def download_video(request: VideoRequest):
                     use_llm=False  # Trust human caption
                 )
 
+                # Store for RAG immediately (Using segments for timestamps)
+                rag_service.index_video(video_id, youtube_result["segments"])
+
                 return {
                     "success": True,
                     "source": "youtube_manual",
@@ -112,6 +115,9 @@ async def download_video(request: VideoRequest):
                     youtube_result["text"],
                     use_llm=False  # Speed optimization: Skip slow LLM cleaning
                 )
+
+                # Store for RAG immediately (Using segments for timestamps)
+                rag_service.index_video(video_id, youtube_result["segments"])
                 
                 return {
                     "success": True,
@@ -157,6 +163,12 @@ async def download_video(request: VideoRequest):
             use_llm=False  # Speed optimization: Skip slow LLM cleaning
         )
 
+        # Prepare segments explicitly
+        segments_data = [{"start": s.start, "end": s.end, "text": s.text} for s in whisper_result.segments]
+
+        # Store for RAG immediately (with timestamps)
+        rag_service.index_video(video_id, segments_data)
+
         return {
             "success": True,
             "source": "whisper",
@@ -167,10 +179,7 @@ async def download_video(request: VideoRequest):
             "raw_text": whisper_result.text,
             "cleaned_text": cleaned["cleaned_text"],
             "cleaning_steps": cleaned["cleaning_steps"],
-            "segments": [
-                {"start": s.start, "end": s.end, "text": s.text}
-                for s in whisper_result.segments
-            ]
+            "segments": segments_data
         }
 
     except HTTPException:
