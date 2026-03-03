@@ -27,6 +27,9 @@ class Settings:
     # Cleaning settings
     CLEANING_MODEL: str = os.getenv("CLEANING_MODEL", "llama-3.1-8b-instant")
     MAX_CHUNK_SIZE: int = 2500  # characters per LLM chunk (reduced slightly for rate limits)
-
+    
+    # RAG Settings
+    # Use absolute path for ChromaDB to avoid CWD issues
+    CHROMA_DB_DIR: str = str(Path(__file__).parent.parent / "chroma_db") 
 
 settings = Settings()

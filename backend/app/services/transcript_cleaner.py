@@ -81,7 +81,13 @@ class TranscriptCleaner:
         "vidsage": "VidSage",
         "fast api": "FastAPI",
         "fastapi": "FastAPI",
-
+        
+        # Technical Terms (Computer Architecture)
+        "one new man": "Von Neumann",
+        "one neumann": "Von Neumann",
+        "von new man": "Von Neumann",
+        "one new one": "Von Neumann",  # Common misinterpretation
+        
         # Common Indian name/place corrections (I will add more as needed)
         "smith kumar": "Sumit Kumar",
         "jyothpur": "Jodhpur",
