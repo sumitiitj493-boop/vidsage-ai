@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.routes import video, transcription, upload, clean, text_input, chat
+from app.api.routes import video, transcription, upload, clean, text_input, chat, pdf
 
 app = FastAPI(title="VidSage API")
 
@@ -19,6 +19,7 @@ app.include_router(upload.router)
 app.include_router(clean.router)
 app.include_router(text_input.router)
 app.include_router(chat.router)
+app.include_router(pdf.router)
 
 
 @app.get("/")
