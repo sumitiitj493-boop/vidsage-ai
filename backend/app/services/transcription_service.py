@@ -42,7 +42,8 @@ class TranscriptionService:
     def transcribe(
         self,
         audio_path: str,
-        language: Optional[str] = None
+        language: Optional[str] = None,
+        progress_callback=None
     ) -> TranscriptionResult:
 
         path = Path(audio_path)
@@ -59,6 +60,10 @@ class TranscriptionService:
         segments = []
         full_text = []
 
+        # Estimate total duration for progress (fallback to 0 if not available)
+        total_duration = getattr(info, 'duration', 0) or 0
+        last_percent = -1
+
         for segment in segments_generator:
             segments.append(
                 TranscriptSegment(
@@ -68,6 +73,17 @@ class TranscriptionService:
                 )
             )
             full_text.append(segment.text.strip())
+
+            # Progress reporting
+            if total_duration > 0 and progress_callback:
+                percent = int(100 * min(segment.end, total_duration) / total_duration)
+                if percent != last_percent and percent % 5 == 0:
+                    progress_callback(percent)
+                    last_percent = percent
+
+        # Ensure 100% is reported
+        if progress_callback:
+            progress_callback(100)
 
         return TranscriptionResult(
             text=" ".join(full_text),

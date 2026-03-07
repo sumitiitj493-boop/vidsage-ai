@@ -152,9 +152,22 @@ async def download_video(request: VideoRequest):
         if youtube_result.get("language"):
              lang_hint = youtube_result["language"].split("-")[0]
              
+
+        import time as _time
+        progress_start_time = _time.time()
+        def print_progress(percent):
+            elapsed = _time.time() - progress_start_time
+            if percent > 0:
+                est_total = elapsed / (percent / 100)
+                est_left = est_total - elapsed
+                print(f"Transcription progress: {percent}% done | Elapsed: {elapsed:.1f}s | Est. left: {est_left:.1f}s", flush=True)
+            else:
+                print(f"Transcription progress: {percent}% done", flush=True)
+
         whisper_result = transcription_service.transcribe(
             audio_path=download_result["file_path"],
-            language=lang_hint
+            language=lang_hint,
+            progress_callback=print_progress
         )
 
         # 5️ Clean the transcript

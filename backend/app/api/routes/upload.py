@@ -35,8 +35,23 @@ async def process_transcription(job_id: str):
 
         job_manager.update_status(job_id, "processing")
 
+        # Progress callback for terminal output
+
+        import time as _time
+        progress_start_time = _time.time()
+        def print_progress(percent):
+            elapsed = _time.time() - progress_start_time
+            if percent > 0:
+                est_total = elapsed / (percent / 100)
+                est_left = est_total - elapsed
+                print(f"Transcription progress for job {job_id}: {percent}% done | Elapsed: {elapsed:.1f}s | Est. left: {est_left:.1f}s", flush=True)
+            else:
+                print(f"Transcription progress for job {job_id}: {percent}% done", flush=True)
+
         # Run blocking transcription in a separate thread to avoid blocking the event loop
-        result = await run_in_threadpool(transcription_service.transcribe, job["file_path"])
+        result = await run_in_threadpool(
+            lambda: transcription_service.transcribe(job["file_path"], progress_callback=print_progress)
+        )
         
         # Clean the transcript (Async)
         # We disable LLM cleaning here to keep the "offline/local" promise by default, 
