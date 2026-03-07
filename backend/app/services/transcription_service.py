@@ -51,6 +51,9 @@ class TranscriptionService:
         if not path.exists():
             raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
+        # Debug: Indicate start of transcription loop
+        print(f"[DEBUG] Starting transcription loop for: {audio_path}", flush=True)
+
         segments_generator, info = self.model.transcribe(
             str(audio_path),
             language=language,
@@ -63,6 +66,10 @@ class TranscriptionService:
         # Estimate total duration for progress (fallback to 0 if not available)
         total_duration = getattr(info, 'duration', 0) or 0
         last_percent = -1
+
+        # Always print 0% at start
+        if progress_callback:
+            progress_callback(0)
 
         for segment in segments_generator:
             segments.append(

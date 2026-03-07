@@ -35,23 +35,33 @@ async def process_transcription(job_id: str):
 
         job_manager.update_status(job_id, "processing")
 
-        # Progress callback for terminal output
-
+        # Preprocess audio before transcription (convert, denoise, trim silence)
+        from app.utils.audio_preprocess import preprocess_audio
         import time as _time
+        import os
+        preprocessed_path = preprocess_audio(job["file_path"])
+
         progress_start_time = _time.time()
         def print_progress(percent):
             elapsed = _time.time() - progress_start_time
-            if percent > 0:
-                est_total = elapsed / (percent / 100)
-                est_left = est_total - elapsed
+            if percent == 0:
+                print(f"Transcription progress for job {job_id}: 0% done | Elapsed: 0.0s | Est. left: --", flush=True)
+            elif percent < 100:
+                est_total = elapsed / (percent / 100) if percent > 0 else 0
+                est_left = est_total - elapsed if percent > 0 else 0
                 print(f"Transcription progress for job {job_id}: {percent}% done | Elapsed: {elapsed:.1f}s | Est. left: {est_left:.1f}s", flush=True)
             else:
-                print(f"Transcription progress for job {job_id}: {percent}% done", flush=True)
+                print(f"Transcription progress for job {job_id}: 100% done | Elapsed: {elapsed:.1f}s | Est. left: 0.0s", flush=True)
 
         # Run blocking transcription in a separate thread to avoid blocking the event loop
-        result = await run_in_threadpool(
-            lambda: transcription_service.transcribe(job["file_path"], progress_callback=print_progress)
-        )
+        try:
+            result = await run_in_threadpool(
+                lambda: transcription_service.transcribe(preprocessed_path, progress_callback=print_progress)
+            )
+        finally:
+            # Clean up temp file
+            if os.path.exists(preprocessed_path):
+                os.remove(preprocessed_path)
         
         # Clean the transcript (Async)
         # We disable LLM cleaning here to keep the "offline/local" promise by default, 

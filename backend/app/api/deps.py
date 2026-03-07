@@ -7,3 +7,4 @@ transcription_service = TranscriptionService(
     model_size=settings.WHISPER_MODEL_SIZE,
     device=settings.WHISPER_DEVICE
 )
+
