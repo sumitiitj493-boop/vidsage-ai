@@ -53,20 +53,21 @@ class AudioUploaderService:
         total_size = 0
 
         try:
-            with open(save_path, "wb") as f:
+            import aiofiles
+            async with aiofiles.open(save_path, "wb") as f:
                 while chunk := await file.read(self.CHUNK_SIZE):
                     total_size += len(chunk)
 
                     # Check size limit during upload
                     if total_size > self.MAX_FILE_SIZE:
-                        f.close()
+                        await f.close()
                         save_path.unlink(missing_ok=True)  # Delete partial file
                         raise HTTPException(
                             status_code=413,
                             detail=f"File too large. Maximum size: {self.MAX_FILE_SIZE // (1024*1024)}MB"
                         )
 
-                    f.write(chunk)
+                    await f.write(chunk)
 
         except HTTPException:
             raise

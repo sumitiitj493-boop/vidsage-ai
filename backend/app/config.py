@@ -32,4 +32,7 @@ class Settings:
     # Use absolute path for ChromaDB to avoid CWD issues
     CHROMA_DB_DIR: str = str(Path(__file__).parent.parent / "chroma_db") 
 
+    # Redis connection used by Celery and job manager
+    REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+
 settings = Settings()
