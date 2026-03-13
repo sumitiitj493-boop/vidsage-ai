@@ -17,6 +17,8 @@ interface UseQuizReturn {
   isGenerating: boolean;
   userAnswers: Record<string, string>;
   score: number | null;
+  debugRaw: string | null;
+  usedSuggestions: boolean | null;
   generateQuiz: (config: QuizConfig, transcriptId?: string, context?: string) => Promise<Quiz | null>;
   submitAnswer: (questionId: string, answer: string) => void;
   calculateScore: () => void;
@@ -28,6 +30,8 @@ export function useQuiz(): UseQuizReturn {
   const [isGenerating, setIsGenerating] = useState(false);
   const [userAnswers, setUserAnswers] = useState<Record<string, string>>({});
   const [score, setScore] = useState<number | null>(null);
+  const [debugRaw, setDebugRaw] = useState<string | null>(null);
+  const [usedSuggestions, setUsedSuggestions] = useState<boolean | null>(null);
 
   const generateQuiz = useCallback(async (
     config: QuizConfig,
@@ -43,6 +47,8 @@ export function useQuiz(): UseQuizReturn {
     setQuiz(null);
     setUserAnswers({});
     setScore(null);
+    setDebugRaw(null);
+    setUsedSuggestions(null);
 
     let finalQuiz: Quiz | null = null;
 
@@ -82,6 +88,8 @@ export function useQuiz(): UseQuizReturn {
           generatedAt: new Date(),
         };
         setQuiz(finalQuiz);
+        setDebugRaw(response.data?.debug_raw ?? null);
+        setUsedSuggestions(response.data?.used_suggestions ?? null);
         toast.success("Quiz generated successfully!");
       } else {
         console.warn("quiz API returned no quiz field", response.data);
@@ -131,6 +139,8 @@ export function useQuiz(): UseQuizReturn {
     isGenerating,
     userAnswers,
     score,
+    debugRaw,
+    usedSuggestions,
     generateQuiz,
     submitAnswer,
     calculateScore,

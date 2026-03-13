@@ -44,12 +44,15 @@ export function QuizGenerator({
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [showExplanation, setShowExplanation] = useState(false);
   const [timeSpent, setTimeSpent] = useState(0);
+  const [showDebug, setShowDebug] = useState(false);
 
   const {
     quiz,
     isGenerating,
     userAnswers,
     score,
+    debugRaw,
+    usedSuggestions,
     generateQuiz,
     submitAnswer,
     calculateScore,
@@ -293,6 +296,35 @@ export function QuizGenerator({
               </AnimatePresence>
             </motion.div>
           </AnimatePresence>
+
+          {/* Debug info */}
+          {(debugRaw || usedSuggestions !== null) && (
+            <div className="mt-6 p-4 rounded-xl bg-dark-900/70 border border-dark-700">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <Target className="w-4 h-4 text-amber-400" />
+                  <span className="text-sm font-medium text-dark-100">Debug</span>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowDebug((prev) => !prev)}
+                >
+                  {showDebug ? "Hide" : "Show"}
+                </Button>
+              </div>
+              {showDebug && (
+                <div className="text-xs font-mono text-dark-300 space-y-2">
+                  {usedSuggestions !== null && (
+                    <div>
+                      Used suggestions: <span className="font-semibold">{usedSuggestions ? "Yes" : "No"}</span>
+                    </div>
+                  )}
+                  <pre className="whitespace-pre-wrap max-h-40 overflow-y-auto">{debugRaw || "(no debug output)"}</pre>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Navigation */}
           <div className="flex items-center justify-between mt-8 pt-4 border-t border-dark-700/50">
