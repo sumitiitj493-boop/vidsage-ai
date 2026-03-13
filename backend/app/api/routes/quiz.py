@@ -1,6 +1,12 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+# the quiz endpoint needs the shared RAG service for accessing the vector
+# database and calling the LLM. importing at module level avoids scoping
+# issues that previously caused an UnboundLocalError when an inner import
+# statement attempted to bind the same name.
+from app.services.rag_service import rag_service
+
 router = APIRouter(prefix="/api/quiz", tags=["Quiz"])
 
 
@@ -35,15 +41,55 @@ def generate_quiz(req: QuizRequest):
     if req.transcriptId:
         try:
             coll = rag_service.chroma_client.get_collection(f"video_{req.transcriptId}")
-            results = coll.get(limit=5)
-            docs = results.get("documents", [])
+            # grab all documents and sample evenly; avoids questions clustering
+            # at the beginning of long transcripts
+            try:
+                results = coll.get()
+                docs = results.get("documents", []) or []
+            except Exception:
+                results = coll.get(limit=50)
+                docs = results.get("documents", []) or []
+
             if docs:
-                context_text = "\n\n".join(docs[:5])
+                max_docs = 5
+                if len(docs) > max_docs:
+                    step = len(docs) / max_docs
+                    sampled = [docs[int(i * step)] for i in range(max_docs)]
+                else:
+                    sampled = docs
+
+                context_text = "\n\n".join(sampled)
+            else:
+                # no vectors stored yet – try fetching a YouTube transcript
+                from app.services.youtube_transcript_service import YouTubeTranscriptService
+                yt = YouTubeTranscriptService.fetch_transcript(req.transcriptId)
+                if yt.get("success") and yt.get("text"):
+                    full = yt["text"]
+                    # split into 5 roughly equal parts
+                    parts = []
+                    chunk_len = max(1, len(full) // 5)
+                    for i in range(0, len(full), chunk_len):
+                        parts.append(full[i : i + chunk_len])
+                    context_text = "\n\n".join(parts[:5])
+                else:
+                    # still nothing; treat as missing
+                    raise ValueError(f"no indexed context and no yt transcript for {req.transcriptId}")
+        except ValueError as ve:
+            # propagate error to client
+            raise HTTPException(status_code=404, detail=str(ve))
         except Exception:
+            # swallow other errors but context_text may remain empty
             pass
 
-    prompt = f"Generate {req.config.questionCount} {req.config.type} questions " \
-             f"(difficulty: {req.config.difficulty}) based on the following context:\n{context_text}"
+    # ask the LLM to produce questions matching the chosen type/difficulty
+    # and return results in a simple JSON array so we can parse options easily
+    prompt = (
+        f"Generate {req.config.questionCount} {req.config.type} questions "
+        f"(difficulty: {req.config.difficulty}) based on the following context:\n{context_text}\n"
+        "Return the output as a JSON array where each element has at least a \"question\" "
+        "field. For MCQ type include an \"options\" list and a \"answer\" key. "
+        "Example: [{\"question\":\"What is X?\", \"options\":[\"A\",\"B\"], \"answer\":\"A\"}]"
+    )
 
     try:
         response = rag_service.groq_client.chat.completions.create(
@@ -52,21 +98,81 @@ def generate_quiz(req: QuizRequest):
             temperature=0.7,
         )
         raw = response.choices[0].message.content.strip()
-        # split into lines and attempt to parse into questions
-        lines = [l.strip() for l in raw.split("\n") if l.strip()]
-        questions = []
-        for idx, line in enumerate(lines[: req.config.questionCount]):
-            # simple cleaning: remove numbering
-            clean = line.lstrip("0123456789. -")
-            q_type = req.config.type if req.config.type != "mixed" else "mcq"
-            entry: dict = {"id": f"q{idx+1}", "type": q_type, "question": clean}
-            if q_type == "mcq":
-                # not enough info to generate options; use placeholders
-                entry["options"] = ["A", "B", "C", "D"]
-                entry["correctAnswer"] = "A"
-            questions.append(entry)
 
-        # if LLM returned fewer questions than requested, pad
+        questions = []
+        # helper to attempt JSON parsing and return None on failure
+        import json, re
+
+        def _try_parse(s: str):
+            try:
+                return json.loads(s)
+            except Exception:
+                return None
+
+        parsed = _try_parse(raw)
+        if parsed is None:
+            # try to locate a JSON array or object anywhere in the response
+            m = re.search(r"(\[.*\])", raw, re.DOTALL)
+            if m:
+                parsed = _try_parse(m.group(1))
+            else:
+                m = re.search(r"(\{.*\})", raw, re.DOTALL)
+                if m:
+                    parsed = _try_parse(m.group(1))
+
+        # turn whatever we parsed into a list of question dicts
+        if isinstance(parsed, list):
+            for idx, item in enumerate(parsed[: req.config.questionCount]):
+                entry = {"id": f"q{idx+1}", **item}
+                entry.setdefault("type", req.config.type if req.config.type != "mixed" else "mcq")
+                questions.append(entry)
+        elif isinstance(parsed, dict) and parsed.get("questions"):
+            for idx, item in enumerate(parsed.get("questions")[: req.config.questionCount]):
+                entry = {"id": f"q{idx+1}", **item}
+                entry.setdefault("type", req.config.type if req.config.type != "mixed" else "mcq")
+                questions.append(entry)
+        else:
+            # fallback to line-based parsing like before
+            lines = [l.strip() for l in raw.split("\n") if l.strip()]
+            for idx, line in enumerate(lines[: req.config.questionCount]):
+                clean = line.lstrip("0123456789. -")
+                q_type = req.config.type if req.config.type != "mixed" else "mcq"
+                entry: dict = {"id": f"q{idx+1}", "type": q_type, "question": clean}
+                if q_type == "mcq":
+                    entry["options"] = ["A", "B", "C", "D"]
+                    entry["correctAnswer"] = "A"
+                questions.append(entry)
+
+        # if LLM gave an empty list or produced no usable lines, try a simpler retry
+        if not questions:
+            import logging
+            logging.getLogger(__name__).warning(
+                "LLM returned empty response for quiz prompt; raw=\"%s\"", raw
+            )
+            # retry without JSON requirement
+            alt_prompt = (
+                f"Generate {req.config.questionCount} {req.config.type} questions"
+                f" (difficulty: {req.config.difficulty}) based on the following context:\n{context_text}"
+            )
+            try:
+                alt_resp = rag_service.groq_client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=[{"role": "user", "content": alt_prompt}],
+                    temperature=0.7,
+                )
+                alt_raw = alt_resp.choices[0].message.content.strip()
+                lines = [l.strip() for l in alt_raw.split("\n") if l.strip()]
+                for idx, line in enumerate(lines[: req.config.questionCount]):
+                    clean = line.lstrip("0123456789. -")
+                    q_type = req.config.type if req.config.type != "mixed" else "mcq"
+                    entry: dict = {"id": f"q{idx+1}", "type": q_type, "question": clean}
+                    if q_type == "mcq":
+                        entry["options"] = ["A", "B", "C", "D"]
+                        entry["correctAnswer"] = "A"
+                    questions.append(entry)
+            except Exception:
+                pass
+
         while len(questions) < req.config.questionCount:
             i = len(questions)
             q_type = req.config.type if req.config.type != "mixed" else "mcq"
@@ -78,12 +184,41 @@ def generate_quiz(req: QuizRequest):
                 "correctAnswer": "A" if q_type == "mcq" else "Sample answer",
             })
 
-        return {"quiz": {"title": "Generated Quiz", "questions": questions}}
+        resp = {"quiz": {"title": "Generated Quiz", "questions": questions}}
+        resp["debug_raw"] = raw
+
+        # if questions are all placeholders, try suggestions endpoint as a backup
+        if all(q.get("question", "").startswith("Sample") for q in questions):
+            resp["used_suggestions"] = False
+            # generate simple questions the same way /api/chat/suggestions does
+            # generate simple questions the same way /api/chat/suggestions does
+            try:
+                suggs = rag_service.generate_suggested_questions(req.transcriptId)
+                # convert to quiz entries
+                questions = []
+                for idx, text in enumerate(suggs[: req.config.questionCount]):
+                    questions.append({
+                        "id": f"q{idx+1}",
+                        "type": req.config.type if req.config.type != "mixed" else "mcq",
+                        "question": text,
+                    })
+                resp = {"quiz": {"title": "Generated Quiz", "questions": questions}}
+                resp["used_suggestions"] = True
+                resp["suggestions"] = suggs
+            except Exception:
+                # keep original placeholders but indicate we tried
+                resp["used_suggestions"] = False
+        return resp
 
     except Exception as e:
         # fallback behaviour for tests / missing key or other error.
-        # Instead of generic samples we try to derive simple questions from
-        # the provided context_text so they are at least related to the video.
+        # The outer try catches any error during prompt construction or LLM
+        # invocation.  Log the exception so we can diagnose why the normal
+        # path failed, and also return the error in the response for easier
+        # debugging during development.
+        import logging
+        logging.getLogger(__name__).exception("quiz generation failed")
+
         questions = []
         # split context into sentences for naive question generation
         sentences = [s.strip() for s in context_text.split('.') if s.strip()]
@@ -99,4 +234,6 @@ def generate_quiz(req: QuizRequest):
                 entry["options"] = ["A", "B", "C", "D"]
                 entry["correctAnswer"] = "A"
             questions.append(entry)
-        return {"quiz": {"title": "Generated Quiz", "questions": questions}}
+        # include error text in response for debugging
+        return {"quiz": {"title": "Generated Quiz", "questions": questions},
+                "debug_error": str(e)}
