@@ -32,7 +32,7 @@ async def clean_transcript(request: CleanRequest):
     1. Basic (regex) -> 2. Custom Dictionary -> 3. LLM (Groq)
     """
     try:
-        result = TranscriptCleaner.clean(
+        result = await TranscriptCleaner.clean(
             text=request.text,
             use_basic=request.use_basic,
             use_dictionary=request.use_dictionary,
