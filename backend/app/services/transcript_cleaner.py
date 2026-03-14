@@ -227,6 +227,7 @@ Corrected transcript:
         """
 
         result = {
+            "raw_text": text,
             "cleaned_text": text,
             "cleaning_steps": []
         }

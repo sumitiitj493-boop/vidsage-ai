@@ -1,29 +1,56 @@
-"""Job manager with Redis backend for shared web/worker state."""
+"""Job manager with Redis backend for shared web/worker state.
+
+This is used to track the status of asynchronous transcription jobs.
+For local development, if the `redis` library or a Redis server is not available,
+we fall back to an in-memory store (not shared across processes).
+"""
 
 import uuid
 import json
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from app.config import settings
-import redis
+import logging
+
+logger = logging.getLogger(__name__)
+
+try:
+    import redis
+except ImportError:  # pragma: no cover
+    redis = None
+    logger.warning(
+        "Redis package not installed; falling back to in-memory job store. "
+        "Install 'redis' for production usage."
+    )
 
 
 class JobManager:
     def __init__(self):
-        # use Redis so both the API server and Celery workers see the same data
-        self.redis = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
+        self._use_redis = redis is not None
+        if self._use_redis:
+            # use Redis so both the API server and Celery workers see the same data
+            self.redis = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
+        else:
+            # In-memory fallback store (not shared between processes)
+            self._store: Dict[str, Dict[str, Any]] = {}
 
     def _make_key(self, job_id: str) -> str:
         return f"job:{job_id}"
 
     def _save(self, job_id: str, data: Dict[str, Any]) -> None:
-        self.redis.set(self._make_key(job_id), json.dumps(data))
+        if self._use_redis:
+            self.redis.set(self._make_key(job_id), json.dumps(data))
+        else:
+            self._store[job_id] = data
 
     def _load(self, job_id: str) -> Dict[str, Any] | None:
-        raw = self.redis.get(self._make_key(job_id))
-        if raw is None:
-            return None
-        return json.loads(raw)
+        if self._use_redis:
+            raw = self.redis.get(self._make_key(job_id))
+            if raw is None:
+                return None
+            return json.loads(raw)
+
+        return self._store.get(job_id)
 
     def create_job(self, file_path: str | None = None) -> str:
         job_id = uuid.uuid4().hex
@@ -79,16 +106,20 @@ class JobManager:
         return self._load(job_id)
 
     def list_jobs(self) -> list[dict]:
-        keys = self.redis.keys("job:*")
-        jobs: list[dict] = []
-        for key in keys:
-            raw = self.redis.get(key)
-            if raw:
-                try:
-                    jobs.append(json.loads(raw))
-                except Exception:
-                    pass
-        return jobs
+        if self._use_redis:
+            keys = self.redis.keys("job:*")
+            jobs: list[dict] = []
+            for key in keys:
+                raw = self.redis.get(key)
+                if raw:
+                    try:
+                        jobs.append(json.loads(raw))
+                    except Exception:
+                        pass
+            return jobs
+
+        # In-memory fallback
+        return list(self._store.values())
 
 
 # Singleton
