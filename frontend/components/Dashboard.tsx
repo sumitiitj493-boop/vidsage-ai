@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { FileText, Mic, Upload, Loader2 } from "lucide-react";
 import QuizGenerator from "@/components/QuizGenerator";
 
 type VideoDownloadState = {
@@ -9,11 +10,74 @@ type VideoDownloadState = {
   response?: any;
 };
 
+function markdownToHtml(markdown: string) {
+  const escapeHtml = (str: string) =>
+    str
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+
+  const lines = escapeHtml(markdown).split(/\r?\n/);
+  const htmlLines: string[] = [];
+  let inList = false;
+
+  for (const line of lines) {
+    if (/^#{3}\s+/.test(line)) {
+      htmlLines.push(`<h3 class="text-lg font-semibold text-white">${line.replace(/^#{3}\s+/, "")}</h3>`);
+      inList = false;
+      continue;
+    }
+    if (/^#{2}\s+/.test(line)) {
+      htmlLines.push(`<h2 class="text-xl font-semibold text-white">${line.replace(/^#{2}\s+/, "")}</h2>`);
+      inList = false;
+      continue;
+    }
+    if (/^#\s+/.test(line)) {
+      htmlLines.push(`<h1 class="text-2xl font-semibold text-white">${line.replace(/^#\s+/, "")}</h1>`);
+      inList = false;
+      continue;
+    }
+    if (/^\s*[-*+]\s+/.test(line)) {
+      if (!inList) {
+        htmlLines.push("<ul class=\"list-disc list-inside text-slate-200\">");
+        inList = true;
+      }
+      const item = line.replace(/^\s*[-*+]\s+/, "");
+      htmlLines.push(`<li>${item}</li>`);
+      continue;
+    }
+    if (inList) {
+      htmlLines.push("</ul>");
+      inList = false;
+    }
+    if (line.trim() === "") {
+      htmlLines.push("<br />");
+      continue;
+    }
+    let formatted = line
+      .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+      .replace(/\*(.*?)\*/g, "<em>$1</em>")
+      .replace(/`([^`]+)`/g, "<code class=\"rounded bg-slate-800 px-1 py-[0.125rem] text-slate-200\">$1</code>");
+    htmlLines.push(`<p class=\"text-slate-200 leading-relaxed\">${formatted}</p>`);
+  }
+
+  if (inList) {
+    htmlLines.push("</ul>");
+  }
+
+  return htmlLines.join("");
+}
+
 export default function Dashboard() {
   const [videoUrl, setVideoUrl] = useState("");
   const [downloadState, setDownloadState] = useState<VideoDownloadState>({ status: "idle" });
   const [stage, setStage] = useState<"empty" | "processing" | "ready">("empty");
-  const [activeTab, setActiveTab] = useState<"chat" | "quiz" | "summary">("chat");
+  const [activeMode, setActiveMode] = useState<"transcript" | "notes" | "quiz">("transcript");
+  const [inputMode, setInputMode] = useState<"youtube" | "pdf" | "audio">("youtube");
+  const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const [audioFile, setAudioFile] = useState<File | null>(null);
+  const [audioJobId, setAudioJobId] = useState<string | null>(null);
+  const [audioStatus, setAudioStatus] = useState<string | null>(null);
 
   const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([]);
   const [chatQuestion, setChatQuestion] = useState("");
@@ -21,7 +85,8 @@ export default function Dashboard() {
   const [chatLoading, setChatLoading] = useState(false);
   const [transcriptText, setTranscriptText] = useState("");
   const [copyStatus, setCopyStatus] = useState<"" | "copied" | "failed">("");
-  const [showTranscript, setShowTranscript] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const audioInputRef = useRef<HTMLInputElement | null>(null);
 
   const videoId = useMemo(() => {
     return downloadState.response?.video_id || downloadState.response?.video_id;
@@ -40,21 +105,48 @@ export default function Dashboard() {
     setDownloadState({ status: "loading" });
     setChatAnswer(null);
     setSuggestedQuestions([]);
+    setAudioJobId(null);
+    setAudioStatus(null);
 
     try {
-      const rawUrl = videoUrl.trim();
-      const normalizedUrl = rawUrl.startsWith("http") ? rawUrl : `https://${rawUrl}`;
+      let data: any;
 
-      const res = await fetch(`${apiBase}/api/video/download`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ video_url: normalizedUrl }),
-      });
+      if (inputMode === "youtube") {
+        const rawUrl = videoUrl.trim();
+        const normalizedUrl = rawUrl.startsWith("http") ? rawUrl : `https://${rawUrl}`;
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data?.detail || data?.message || "Failed to process video");
+        const res = await fetch(`${apiBase}/api/video/download`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ video_url: normalizedUrl }),
+        });
+        data = await res.json();
+        if (!res.ok) throw new Error(data?.detail || data?.message || "Failed to process video");
+      } else if (inputMode === "pdf") {
+        if (!pdfFile) throw new Error("Select a PDF file first.");
+        const form = new FormData();
+        form.append("file", pdfFile);
+        const res = await fetch(`${apiBase}/api/pdf/upload`, {
+          method: "POST",
+          body: form,
+        });
+        data = await res.json();
+        if (!res.ok) throw new Error(data?.detail || data?.message || "Failed to upload PDF");
+      } else if (inputMode === "audio") {
+        if (!audioFile) throw new Error("Select an audio file first.");
+        const form = new FormData();
+        form.append("file", audioFile);
+        const res = await fetch(`${apiBase}/api/audio/upload`, {
+          method: "POST",
+          body: form,
+        });
+        const result = await res.json();
+        if (!res.ok) throw new Error(result?.detail || result?.message || "Failed to upload audio");
+        if (!result.job_id) throw new Error("No job id returned");
+        setAudioJobId(result.job_id);
+        setAudioStatus("queued");
+        data = { video_id: result.job_id, source: "audio_upload" };
+        pollAudioStatus(result.job_id);
       }
 
       setDownloadState({ status: "done", response: data });
@@ -69,9 +161,7 @@ export default function Dashboard() {
       setTranscriptText(rawText);
       setCopyStatus("");
       setStage("ready");
-      setShowTranscript(false);
 
-      // load suggested questions for chat
       try {
         const suggRes = await fetch(`${apiBase}/api/chat/suggest/${data.video_id}`);
         if (suggRes.ok) {
@@ -84,7 +174,7 @@ export default function Dashboard() {
         // ignore
       }
 
-      setActiveTab("chat");
+      setActiveMode("transcript");
     } catch (err) {
       setDownloadState({ status: "error", error: err instanceof Error ? err.message : String(err) });
       setStage("empty");
@@ -109,11 +199,33 @@ export default function Dashboard() {
     loadSuggestions();
   }, [videoId]);
 
+  const pollAudioStatus = async (jobId: string) => {
+    try {
+      const res = await fetch(`${apiBase}/api/audio/status/${jobId}`);
+      const data = await res.json();
+      setAudioStatus(data.status);
+      if (data.status === "completed") {
+        // fetch result now
+        const result = await fetch(`${apiBase}/api/audio/result/${jobId}`);
+        const rl = await result.json();
+        if (rl.status === "completed") {
+          setDownloadState({ status: "done", response: rl.result });
+          setStage("ready");
+        }
+        return;
+      }
+      if (data.status === "queued" || data.status === "processing") {
+        setTimeout(() => pollAudioStatus(jobId), 2500);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
   const askQuestion = async (question: string) => {
     if (!videoId || !question.trim()) return;
     setChatLoading(true);
     setChatAnswer(null);
-    setActiveTab("chat");
 
     try {
       const res = await fetch(`${apiBase}/api/chat/ask`, {
@@ -135,13 +247,15 @@ export default function Dashboard() {
 
   const resetSession = () => {
     setVideoUrl("");
+    setPdfFile(null);
+    setAudioFile(null);
+    setInputMode("youtube");
     setDownloadState({ status: "idle" });
     setStage("empty");
-    setActiveTab("chat");
+    setActiveMode("transcript");
     setSuggestedQuestions([]);
     setChatQuestion("");
     setChatAnswer(null);
-    setShowTranscript(false);
     setTranscriptText("");
   };
 
@@ -176,23 +290,96 @@ export default function Dashboard() {
 
         <div className="flex-1">
           <div className="mx-auto max-w-3xl">
-            <div className="relative">
-              <input
-                value={videoUrl}
-                onChange={(e) => setVideoUrl(e.target.value)}
-                placeholder="Paste a YouTube URL and press Enter"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleProcessVideo();
-                }}
-                className="w-full rounded-full border border-white/15 bg-slate-950/40 px-6 py-3 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500"
-              />
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <input
+                  value={videoUrl}
+                  onChange={(e) => {
+                    setVideoUrl(e.target.value);
+                    setInputMode("youtube");
+                  }}
+                  placeholder={
+                    inputMode === "youtube"
+                      ? "Paste a YouTube URL and press Enter"
+                      : inputMode === "pdf"
+                      ? pdfFile?.name || "Select a PDF file to process"
+                      : audioFile?.name || "Select an audio file to process"
+                  }
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleProcessVideo();
+                  }}
+                  className="w-full rounded-full border border-white/15 bg-slate-950/40 px-6 py-3 pr-32 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                />
+                <button
+                  onClick={handleProcessVideo}
+                  disabled={
+                    stage === "processing" ||
+                    (inputMode === "youtube" && !videoUrl.trim()) ||
+                    (inputMode === "pdf" && !pdfFile) ||
+                    (inputMode === "audio" && !audioFile)
+                  }
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-emerald-500 px-5 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
+                >
+                  {stage === "processing" ? "Processing..." : "Process"}
+                </button>
+              </div>
+
               <button
-                onClick={handleProcessVideo}
-                disabled={!videoUrl || stage === "processing"}
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-emerald-500 px-5 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
+                type="button"
+                onClick={() => {
+                  setInputMode("pdf");
+                  fileInputRef.current?.click();
+                }}
+                className={
+                  "flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-slate-950/40 text-slate-200 hover:bg-slate-800/60 " +
+                  (inputMode === "pdf" ? "ring-2 ring-amber-500" : "")
+                }
+                title="Upload PDF"
               >
-                {stage === "processing" ? "Processing..." : "Process"}
+                <FileText className="h-5 w-5" />
               </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setInputMode("audio");
+                  audioInputRef.current?.click();
+                }}
+                className={
+                  "flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-slate-950/40 text-slate-200 hover:bg-slate-800/60 " +
+                  (inputMode === "audio" ? "ring-2 ring-amber-500" : "")
+                }
+                title="Upload Audio"
+              >
+                <Mic className="h-5 w-5" />
+              </button>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/pdf"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  setPdfFile(file);
+                  setInputMode("pdf");
+                  setVideoUrl("");
+                }}
+              />
+              <input
+                ref={audioInputRef}
+                type="file"
+                accept="audio/*"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  setAudioFile(file);
+                  setInputMode("audio");
+                  setVideoUrl("");
+                }}
+              />
             </div>
           </div>
         </div>
@@ -217,26 +404,29 @@ export default function Dashboard() {
         {stage === "empty" && (
           <div className="mt-16 flex flex-col items-center justify-center gap-4 text-center">
             <div className="max-w-xl rounded-3xl border border-white/10 bg-slate-900/50 px-10 py-12">
-              <h2 className="text-2xl font-semibold text-white">Start by entering a YouTube URL</h2>
+              <h2 className="text-2xl font-semibold text-white">Ready to generate insights</h2>
               <p className="mt-2 text-sm text-slate-300">
-                VidSage will process the video, extract the transcript, and unlock Quiz & Chat.
+                Paste a YouTube URL, upload a PDF, or upload audio using the controls in the header.
               </p>
-              <button
-                onClick={handleProcessVideo}
-                disabled={!videoUrl}
-                className="mt-6 rounded-xl bg-amber-500 px-8 py-3 text-sm font-semibold text-slate-950 hover:bg-amber-400 disabled:opacity-50"
-              >
-                Process Video
-              </button>
+            </div>
+          </div>
+        )}
+
+        {stage === "processing" && (
+          <div className="mt-16 flex flex-col items-center justify-center gap-4 text-center">
+            <div className="flex flex-col items-center gap-4 rounded-3xl border border-white/10 bg-slate-900/50 px-10 py-12">
+              <Loader2 className="h-12 w-12 animate-spin text-amber-400" />
+              <h2 className="text-2xl font-semibold text-white">Extracting wisdom from your video...</h2>
+              <p className="text-sm text-slate-300">This can take a moment. We'll notify you when the transcript is ready.</p>
             </div>
           </div>
         )}
 
         {stage === "ready" && (
-          <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6">
-            {/* Sidebar */}
-            <aside className="space-y-6">
-              <div className="rounded-2xl border border-white/10 bg-slate-900/50 p-5">
+          <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr_360px] gap-6 items-stretch min-h-[60vh]">
+            {/* Left Sidebar (Navigation) */}
+            <aside className="space-y-6 h-full">
+              <div className="flex h-full flex-col rounded-2xl border border-white/10 bg-slate-900/50 p-5">
                 <div className="flex items-start gap-4">
                   <img
                     src={`https://img.youtube.com/vi/${videoId}/hqdefault.jpg`}
@@ -250,161 +440,147 @@ export default function Dashboard() {
                   </div>
                 </div>
 
-                <div className="mt-4 flex flex-col gap-2">
+                <div className="mt-6 flex flex-col gap-2">
                   <button
-                    onClick={() => setShowTranscript((prev) => !prev)}
-                    className="rounded-xl bg-indigo-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-indigo-400"
-                  >
-                    {showTranscript ? "Hide Transcript" : "Show Transcript"}
-                  </button>
-                  {showTranscript && (
-                    <div className="mt-3 max-h-60 overflow-y-auto rounded-xl border border-white/10 bg-slate-950/40 p-3 text-sm text-slate-200">
-                      {transcriptText ? (
-                        <pre className="whitespace-pre-wrap">{transcriptText}</pre>
-                      ) : (
-                        <p className="text-slate-400">Transcript is empty.</p>
-                      )}
-                    </div>
-                  )}
-                  <div className="flex gap-2">
-                    <button
-                      onClick={async () => {
-                        try {
-                          await navigator.clipboard.writeText(transcriptText);
-                          setCopyStatus("copied");
-                          setTimeout(() => setCopyStatus(""), 1500);
-                        } catch {
-                          setCopyStatus("failed");
-                          setTimeout(() => setCopyStatus(""), 1500);
-                        }
-                      }}
-                      disabled={!transcriptText}
-                      className="flex-1 rounded-xl bg-slate-800 px-3 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800/75 disabled:opacity-40"
-                    >
-                      Copy Transcript
-                    </button>
-                    <button
-                      onClick={() => setTranscriptText("")}
-                      disabled={!transcriptText}
-                      className="flex-1 rounded-xl bg-slate-800 px-3 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800/75 disabled:opacity-40"
-                    >
-                      Clear
-                    </button>
-                  </div>
-                  {copyStatus === "copied" && <p className="text-xs text-emerald-300">Copied!</p>}
-                  {copyStatus === "failed" && <p className="text-xs text-rose-300">Copy failed</p>}
-                </div>
-              </div>
-            </aside>
-
-            {/* Main action panel */}
-            <section className="rounded-2xl border border-white/10 bg-slate-900/50 p-6">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-semibold text-white">Learning Session</h2>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setActiveTab("chat")}
+                    onClick={() => setActiveMode("transcript")}
                     className={
-                      "rounded-full px-4 py-2 text-sm font-semibold " +
-                      (activeTab === "chat"
+                      "rounded-xl px-4 py-2 text-sm font-medium " +
+                      (activeMode === "transcript"
                         ? "bg-amber-500 text-slate-950"
-                        : "bg-slate-800 text-slate-200 hover:bg-slate-800/75")
+                        : "bg-transparent text-slate-200 hover:bg-slate-800/40")
                     }
                   >
-                    Chat
+                    Transcript
                   </button>
                   <button
-                    onClick={() => setActiveTab("quiz")}
+                    onClick={() => setActiveMode("notes")}
                     className={
-                      "rounded-full px-4 py-2 text-sm font-semibold " +
-                      (activeTab === "quiz"
+                      "rounded-xl px-4 py-2 text-sm font-medium " +
+                      (activeMode === "notes"
                         ? "bg-amber-500 text-slate-950"
-                        : "bg-slate-800 text-slate-200 hover:bg-slate-800/75")
+                        : "bg-transparent text-slate-200 hover:bg-slate-800/40")
+                    }
+                  >
+                    Notes
+                  </button>
+                  <button
+                    onClick={() => setActiveMode("quiz")}
+                    className={
+                      "rounded-xl px-4 py-2 text-sm font-medium " +
+                      (activeMode === "quiz"
+                        ? "bg-amber-500 text-slate-950"
+                        : "bg-transparent text-slate-200 hover:bg-slate-800/40")
                     }
                   >
                     Quiz
                   </button>
-                  <button
-                    onClick={() => setActiveTab("summary")}
-                    className={
-                      "rounded-full px-4 py-2 text-sm font-semibold " +
-                      (activeTab === "summary"
-                        ? "bg-amber-500 text-slate-950"
-                        : "bg-slate-800 text-slate-200 hover:bg-slate-800/75")
-                    }
-                  >
-                    Summary
-                  </button>
+                </div>
+
+                <div className="mt-auto rounded-xl border border-white/10 bg-slate-950/40 p-4 text-sm text-slate-200">
+                  <div className="font-semibold text-slate-100 mb-2">Stats</div>
+                  <div className="text-xs text-slate-400">Transcript length: {transcriptText.length} chars</div>
+                  {audioJobId && (
+                    <div className="mt-2 text-xs text-slate-400">
+                      Audio job: {audioJobId} ({audioStatus || "pending"})
+                    </div>
+                  )}
                 </div>
               </div>
+            </aside>
 
-              <div className="mt-6">
-                {activeTab === "chat" && (
-                  <div className="space-y-4">
-                    <div className="rounded-xl border border-white/10 bg-slate-900/60 p-4">
-                      <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
-                        <span>Suggestions</span>
-                        <span className="text-slate-500">Tap to ask</span>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {suggestedQuestions.slice(0, 8).map((q) => (
-                          <button
-                            key={q}
-                            onClick={() => {
-                              setChatQuestion(q);
-                              askQuestion(q);
-                            }}
-                            className="rounded-full bg-slate-800/60 px-3 py-1 text-xs text-slate-200 hover:bg-slate-800"
-                          >
-                            {q}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl border border-white/10 bg-slate-900/60 p-4">
-                      <div className="flex gap-2">
-                        <input
-                          value={chatQuestion}
-                          onChange={(e) => setChatQuestion(e.target.value)}
-                          placeholder="Ask a question..."
-                          className="flex-1 rounded-xl border border-white/10 bg-slate-950/40 px-4 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
-                        />
-                        <button
-                          onClick={() => askQuestion(chatQuestion)}
-                          disabled={!chatQuestion.trim() || chatLoading}
-                          className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
-                        >
-                          {chatLoading ? "Thinking..." : "Send"}
-                        </button>
-                      </div>
-
-                      {chatAnswer && (
-                        <div className="mt-4 rounded-xl bg-slate-900/50 border border-white/10 p-4 text-sm text-slate-200">
-                          <div className="text-xs text-slate-400 mb-2">Answer</div>
-                          <div className="whitespace-pre-wrap">{chatAnswer}</div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {activeTab === "quiz" && (
-                  <div className="rounded-xl border border-white/10 bg-slate-900/60 p-4">
-                    <QuizGenerator transcriptId={videoId} videoTitle={videoTitle || "YouTube Video"} />
-                  </div>
-                )}
-
-                {activeTab === "summary" && (
-                  <div className="rounded-xl border border-white/10 bg-slate-900/60 p-6">
-                    <h3 className="text-base font-semibold text-white mb-3">Summary</h3>
-                    <div className="text-sm text-slate-200 max-h-96 overflow-y-auto whitespace-pre-wrap">
-                      {transcriptText || "No transcript available yet."}
-                    </div>
-                  </div>
-                )}
+            {/* Center Content */}
+            <main className="rounded-2xl border border-white/10 bg-slate-900/50 p-6">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-semibold text-white">{activeMode === "transcript" ? "Transcript" : activeMode === "notes" ? "Notes" : "Quiz"}</h2>
               </div>
-            </section>
+
+              {activeMode === "transcript" && (
+                <div className="mt-4 max-h-[60vh] overflow-y-auto rounded-xl border border-white/10 bg-slate-950/40 p-4 text-sm leading-relaxed text-slate-200">
+                  {transcriptText ? (
+                    <pre className="whitespace-pre-wrap">{transcriptText}</pre>
+                  ) : (
+                    <p className="text-slate-400">Transcript is empty.</p>
+                  )}
+                </div>
+              )}
+
+              {activeMode === "notes" && (
+                <div className="mt-4 rounded-xl border border-white/10 bg-slate-950/40 p-6 text-sm text-slate-200">
+                  <div className="text-sm text-slate-400 mb-2">Notes (Markdown)</div>
+                  {transcriptText ? (
+                    <div
+                      className="prose prose-invert max-w-none leading-relaxed"
+                      dangerouslySetInnerHTML={{ __html: markdownToHtml(transcriptText) }}
+                    />
+                  ) : (
+                    <p className="text-slate-400">No transcript available yet.</p>
+                  )}
+                </div>
+              )}
+
+              {activeMode === "quiz" && (
+                <div className="mt-4 rounded-xl border border-white/10 bg-slate-950/40 p-6">
+                  <QuizGenerator transcriptId={videoId} videoTitle={videoTitle || "YouTube Video"} />
+                </div>
+              )}
+            </main>
+
+            {/* Right Sidebar (Sage Assistant) */}
+            <aside className="space-y-6 h-full">
+              <div className="flex h-full flex-col rounded-2xl border border-white/10 bg-slate-800/50 p-5">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-white">Sage Assistant</h3>
+                  <span className="text-xs text-slate-400">AI Chat</span>
+                </div>
+
+                <div className="mt-4 flex flex-1 flex-col overflow-hidden">
+                  <div className="flex-1 space-y-4 overflow-y-auto pr-2">
+                    {chatAnswer ? (
+                      <div className="rounded-xl bg-slate-900/50 border border-white/10 p-4 text-sm text-slate-200">
+                        <div className="text-xs text-slate-400 mb-2">Answer</div>
+                        <div className="whitespace-pre-wrap">{chatAnswer}</div>
+                      </div>
+                    ) : (
+                      <div className="text-sm text-slate-400">Ask a question to get started.</div>
+                    )}
+                  </div>
+
+                  <div className="mt-4 border-t border-white/10 pt-4">
+                    <div className="text-xs uppercase tracking-wide text-slate-400">Quick Questions</div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {suggestedQuestions.slice(0, 6).map((q) => (
+                        <button
+                          key={q}
+                          onClick={() => {
+                            setChatQuestion(q);
+                            askQuestion(q);
+                          }}
+                          className="rounded-full bg-slate-800/60 px-3 py-1 text-xs text-slate-200 hover:bg-slate-800"
+                        >
+                          {q}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="mt-4 flex gap-2">
+                      <input
+                        value={chatQuestion}
+                        onChange={(e) => setChatQuestion(e.target.value)}
+                        placeholder="Ask the Sage..."
+                        className="flex-1 rounded-xl border border-white/10 bg-slate-950/40 px-4 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                      />
+                      <button
+                        onClick={() => askQuestion(chatQuestion)}
+                        disabled={!chatQuestion.trim() || chatLoading}
+                        className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
+                      >
+                        {chatLoading ? "Thinking..." : "Send"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </aside>
           </div>
         )}
       </main>
