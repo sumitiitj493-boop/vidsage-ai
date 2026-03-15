@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FileText, Mic, Upload, Loader2 } from "lucide-react";
+import { CheckCircle2, Copy, FileText, Loader2, Mic, Upload } from "lucide-react";
 import QuizGenerator from "@/components/QuizGenerator";
 
 type VideoDownloadState = {
@@ -72,19 +72,51 @@ export default function Dashboard() {
   const [videoUrl, setVideoUrl] = useState("");
   const [downloadState, setDownloadState] = useState<VideoDownloadState>({ status: "idle" });
   const [stage, setStage] = useState<"empty" | "processing" | "ready">("empty");
-  const [activeMode, setActiveMode] = useState<"transcript" | "notes" | "quiz">("transcript");
+  const [activeMode, setActiveMode] = useState<"transcript" | "notes" | "quiz" | "progress">("transcript");
+  const [audioProgress, setAudioProgress] = useState<number | null>(null);
+  const [audioElapsed, setAudioElapsed] = useState<number | null>(null);
+  const [audioEstimated, setAudioEstimated] = useState<number | null>(null);
+  const [audioStatus, setAudioStatus] = useState<string | null>(null);
+
+  const [copyStatus, setCopyStatus] = useState<"" | "copied" | "failed">("");
+  const [copyHint, setCopyHint] = useState<string>("");
+
+  const isAudioDone =
+    audioStatus === "completed" || (audioProgress !== null && audioProgress >= 100);
+
+  const truncateMiddle = (value: string, visibleChars = 8) => {
+    if (!value || value.length <= visibleChars * 2) return value;
+    return `${value.slice(0, visibleChars)}…${value.slice(-visibleChars)}`;
+  };
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyStatus("copied");
+      setCopyHint("Copied!");
+      setTimeout(() => {
+        setCopyStatus("");
+        setCopyHint("");
+      }, 1500);
+    } catch {
+      setCopyStatus("failed");
+      setCopyHint("Copy failed");
+      setTimeout(() => {
+        setCopyStatus("");
+        setCopyHint("");
+      }, 1500);
+    }
+  };
   const [inputMode, setInputMode] = useState<"youtube" | "pdf" | "audio">("youtube");
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [audioJobId, setAudioJobId] = useState<string | null>(null);
-  const [audioStatus, setAudioStatus] = useState<string | null>(null);
 
   const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([]);
   const [chatQuestion, setChatQuestion] = useState("");
   const [chatAnswer, setChatAnswer] = useState<string | null>(null);
   const [chatLoading, setChatLoading] = useState(false);
   const [transcriptText, setTranscriptText] = useState("");
-  const [copyStatus, setCopyStatus] = useState<"" | "copied" | "failed">("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const audioInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -144,7 +176,11 @@ export default function Dashboard() {
         if (!res.ok) throw new Error(result?.detail || result?.message || "Failed to upload audio");
         if (!result.job_id) throw new Error("No job id returned");
         setAudioJobId(result.job_id);
-        setAudioStatus("queued");
+setAudioStatus("uploading");
+      setAudioProgress(0);
+      setAudioElapsed(0);
+      setAudioEstimated(null);
+      setActiveMode("progress");
         data = { video_id: result.job_id, source: "audio_upload" };
         pollAudioStatus(result.job_id);
       }
@@ -160,7 +196,9 @@ export default function Dashboard() {
 
       setTranscriptText(rawText);
       setCopyStatus("");
-      setStage("ready");
+      if (inputMode !== "audio") {
+        setStage("ready");
+      }
 
       try {
         const suggRes = await fetch(`${apiBase}/api/chat/suggest/${data.video_id}`);
@@ -174,7 +212,8 @@ export default function Dashboard() {
         // ignore
       }
 
-      setActiveMode("transcript");
+      // For audio uploads, show progress/status instead of transcript by default
+      setActiveMode(inputMode === "audio" ? "progress" : "transcript");
     } catch (err) {
       setDownloadState({ status: "error", error: err instanceof Error ? err.message : String(err) });
       setStage("empty");
@@ -199,11 +238,28 @@ export default function Dashboard() {
     loadSuggestions();
   }, [videoId]);
 
+  useEffect(() => {
+    if (activeMode === "progress" && isAudioDone) {
+      setActiveMode("notes");
+    }
+  }, [activeMode, isAudioDone]);
+
   const pollAudioStatus = async (jobId: string) => {
     try {
       const res = await fetch(`${apiBase}/api/audio/status/${jobId}`);
       const data = await res.json();
       setAudioStatus(data.status);
+
+      if (typeof data.progress === "number") {
+        setAudioProgress(data.progress);
+      }
+      if (typeof data.elapsed === "number") {
+        setAudioElapsed(data.elapsed);
+      }
+      if (typeof data.estimated === "number") {
+        setAudioEstimated(data.estimated);
+      }
+
       if (data.status === "completed") {
         // fetch result now
         const result = await fetch(`${apiBase}/api/audio/result/${jobId}`);
@@ -214,7 +270,9 @@ export default function Dashboard() {
         }
         return;
       }
-      if (data.status === "queued" || data.status === "processing") {
+
+      // continue polling while processing
+      if (data.status && data.status !== "completed" && data.status !== "failed") {
         setTimeout(() => pollAudioStatus(jobId), 2500);
       }
     } catch {
@@ -257,6 +315,12 @@ export default function Dashboard() {
     setChatQuestion("");
     setChatAnswer(null);
     setTranscriptText("");
+    setAudioStatus(null);
+    setAudioProgress(null);
+    setAudioElapsed(null);
+    setAudioEstimated(null);
+    setCopyStatus("");
+    setCopyHint("");
   };
 
   const canGenerateQuiz = !!videoId;
@@ -418,6 +482,29 @@ export default function Dashboard() {
               <Loader2 className="h-12 w-12 animate-spin text-amber-400" />
               <h2 className="text-2xl font-semibold text-white">Extracting wisdom from your video...</h2>
               <p className="text-sm text-slate-300">This can take a moment. We'll notify you when the transcript is ready.</p>
+
+              {inputMode === "audio" && (
+                <div className="mt-6 w-full max-w-lg rounded-xl border border-white/10 bg-slate-950/40 p-4 text-left text-sm">
+                  <div className="flex items-center justify-between text-xs text-slate-400">
+                    <span>Status</span>
+                    <span className="text-slate-200">{audioStatus || "starting..."}</span>
+                  </div>
+                  <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-900">
+                    <div
+                      className="h-full rounded-full bg-amber-500"
+                      style={{ width: `${audioProgress ?? 0}%` }}
+                    />
+                  </div>
+                  {audioProgress != null && (
+                    <div className="mt-2 flex items-center justify-between text-xs text-slate-400">
+                      <span>{audioProgress.toFixed(0)}%</span>
+                      {audioEstimated != null && (
+                        <span>ETA: {formatTime(audioEstimated)}</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -442,15 +529,17 @@ export default function Dashboard() {
 
                 <div className="mt-6 flex flex-col gap-2">
                   <button
-                    onClick={() => setActiveMode("transcript")}
+                    onClick={() =>
+                      setActiveMode(inputMode === "audio" ? "progress" : "transcript")
+                    }
                     className={
                       "rounded-xl px-4 py-2 text-sm font-medium " +
-                      (activeMode === "transcript"
+                      (activeMode === "transcript" || activeMode === "progress"
                         ? "bg-amber-500 text-slate-950"
                         : "bg-transparent text-slate-200 hover:bg-slate-800/40")
                     }
                   >
-                    Transcript
+                    {inputMode === "audio" ? "Progress" : "Transcript"}
                   </button>
                   <button
                     onClick={() => setActiveMode("notes")}
@@ -480,9 +569,24 @@ export default function Dashboard() {
                   <div className="font-semibold text-slate-100 mb-2">Stats</div>
                   <div className="text-xs text-slate-400">Transcript length: {transcriptText.length} chars</div>
                   {audioJobId && (
-                    <div className="mt-2 text-xs text-slate-400">
-                      Audio job: {audioJobId} ({audioStatus || "pending"})
+                    <div className="mt-2 flex items-center gap-2 text-xs text-slate-400">
+                      <span>Job:</span>
+                      <span className="truncate">{truncateMiddle(audioJobId)}</span>
+                      <button
+                        type="button"
+                        onClick={() => copyToClipboard(audioJobId)}
+                        className="ml-auto flex h-6 w-6 items-center justify-center rounded-full bg-slate-900/50 text-slate-300 hover:bg-slate-800"
+                        title="Copy job ID"
+                      >
+                        <Copy className="h-4 w-4" />
+                      </button>
+                      {copyHint && (
+                        <span className="text-xs text-emerald-300">{copyHint}</span>
+                      )}
                     </div>
+                  )}
+                  {audioStatus && (
+                    <div className="mt-1 text-xs text-slate-400">Status: {audioStatus}</div>
                   )}
                 </div>
               </div>
@@ -491,8 +595,127 @@ export default function Dashboard() {
             {/* Center Content */}
             <main className="rounded-2xl border border-white/10 bg-slate-900/50 p-6">
               <div className="flex items-center justify-between">
-                <h2 className="text-xl font-semibold text-white">{activeMode === "transcript" ? "Transcript" : activeMode === "notes" ? "Notes" : "Quiz"}</h2>
+                <h2 className="text-xl font-semibold text-white">
+                  {activeMode === "progress"
+                    ? "Audio progress"
+                    : activeMode === "transcript"
+                    ? "Transcript"
+                    : activeMode === "notes"
+                    ? "Notes"
+                    : "Quiz"}
+                </h2>
               </div>
+
+              {activeMode === "progress" && (
+                <div className="mt-4 rounded-xl border border-white/10 bg-slate-950/40 p-6 text-sm text-slate-200">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-medium text-white">Status</div>
+                    <div className="text-lg font-semibold text-white">
+                      {audioProgress != null ? `${audioProgress.toFixed(0)}%` : "—"}
+                    </div>
+                  </div>
+
+                  <div className="mt-3 h-3 w-full overflow-hidden rounded-full bg-slate-900">
+                    <div
+                      className={
+                        "h-full rounded-full " +
+                        (isAudioDone
+                          ? "bg-emerald-500"
+                          : "shimmer bg-amber-500")
+                      }
+                      style={{ width: `${audioProgress ?? 0}%` }}
+                    />
+                  </div>
+
+                  <div className="mt-4 space-y-3">
+                    <div className="flex items-center justify-between text-sm text-slate-200">
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-xs text-slate-400">Current</span>
+                        <span className="text-base font-semibold">
+                          {audioStatus || "waiting"}
+                        </span>
+                      </div>
+                      {isAudioDone && (
+                        <span className="rounded-full bg-emerald-500/20 px-3 py-1 text-xs font-semibold text-emerald-100">
+                          Complete
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      {[
+                        "uploading",
+                        "queued",
+                        "preprocessing",
+                        "transcribing",
+                        "cleaning",
+                        "indexing",
+                      ].map((step) => {
+                        const order = [
+                          "uploading",
+                          "queued",
+                          "preprocessing",
+                          "transcribing",
+                          "cleaning",
+                          "indexing",
+                        ];
+                        const currentIndex = order.indexOf(audioStatus || "");
+                        const stepIndex = order.indexOf(step);
+                        const isDone = isAudioDone || stepIndex < currentIndex;
+                        const isActive = !isAudioDone && stepIndex === currentIndex;
+
+                        return (
+                          <div
+                            key={step}
+                            className={
+                              "flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-1 backdrop-blur-sm " +
+                              (isActive
+                                ? "bg-amber-500/20 text-amber-100"
+                                : isDone
+                                ? "bg-emerald-500/10 text-emerald-200"
+                                : "bg-white/5 text-slate-400")
+                            }
+                          >
+                            <span>
+                              {isActive ? (
+                                <Loader2 className="h-4 w-4 animate-spin text-amber-300" />
+                              ) : isDone ? (
+                                <CheckCircle2 className="h-4 w-4 text-emerald-300" />
+                              ) : (
+                                <span className="h-2 w-2 rounded-full bg-slate-500" />
+                              )}
+                            </span>
+                            <span className="capitalize">{step}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {isAudioDone ? (
+                      <div className="mt-4 rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-4 text-center">
+                        <div className="flex items-center justify-center gap-2 text-sm font-semibold text-emerald-100">
+                          <CheckCircle2 className="h-5 w-5" />
+                          <span>Analysis Complete!</span>
+                        </div>
+
+                        <button
+                          onClick={() => setActiveMode("notes")}
+                          className="mt-4 inline-flex items-center justify-center rounded-lg bg-emerald-500 px-5 py-2 text-sm font-semibold text-slate-950 shadow-md shadow-emerald-500/30 hover:bg-emerald-400"
+                        >
+                          Go to Notes
+                        </button>
+                      </div>
+                    ) : (
+                      audioElapsed != null &&
+                      audioEstimated != null && (
+                        <div className="text-xs text-slate-400">
+                          {`Elapsed: ${formatTime(audioElapsed)} · ETA: ${formatTime(audioEstimated)}`}
+                        </div>
+                      )
+                    )}
+                  </div>
+                </div>
+              )}
 
               {activeMode === "transcript" && (
                 <div className="mt-4 max-h-[60vh] overflow-y-auto rounded-xl border border-white/10 bg-slate-950/40 p-4 text-sm leading-relaxed text-slate-200">

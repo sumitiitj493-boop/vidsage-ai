@@ -73,6 +73,14 @@ async def get_status(job_id: str):
         "completed_at": job["completed_at"],
     }
 
+    # Provide progress metadata so clients can show a progress bar
+    if job.get("progress") is not None:
+        response["progress"] = job["progress"]
+    if job.get("elapsed") is not None:
+        response["elapsed"] = job["elapsed"]
+    if job.get("estimated") is not None:
+        response["estimated"] = job["estimated"]
+
     if job.get("error"):
         response["error"] = job["error"]
         
