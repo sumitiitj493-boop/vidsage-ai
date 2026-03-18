@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, Copy, FileText, Loader2, Mic, Upload } from "lucide-react";
-import QuizGenerator from "@/components/QuizGenerator";
+import ReactMarkdown from "react-markdown";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import { CheckCircle2, Copy, FileText, Loader2, Maximize2, Minimize2, Mic, Upload } from "lucide-react";
 
 type VideoDownloadState = {
   status: "idle" | "loading" | "done" | "error";
@@ -72,7 +74,8 @@ export default function Dashboard() {
   const [videoUrl, setVideoUrl] = useState("");
   const [downloadState, setDownloadState] = useState<VideoDownloadState>({ status: "idle" });
   const [stage, setStage] = useState<"empty" | "processing" | "ready">("empty");
-  const [activeMode, setActiveMode] = useState<"transcript" | "notes" | "quiz" | "progress">("transcript");
+  const [activeMode, setActiveMode] = useState<"transcript" | "notes" | "progress">("transcript");
+  const [showTranscript, setShowTranscript] = useState(false);
   const [audioProgress, setAudioProgress] = useState<number | null>(null);
   const [audioElapsed, setAudioElapsed] = useState<number | null>(null);
   const [audioEstimated, setAudioEstimated] = useState<number | null>(null);
@@ -88,6 +91,32 @@ export default function Dashboard() {
     if (!value || value.length <= visibleChars * 2) return value;
     return `${value.slice(0, visibleChars)}…${value.slice(-visibleChars)}`;
   };
+
+  const parseTimestamp = (ts: string) => {
+    const parts = ts.split(":").map(Number);
+    if (parts.length === 2) return parts[0] * 60 + parts[1];
+    if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    return null;
+  };
+
+  const linkifyTimestamps = (text: string, videoId: string) => {
+    // Match timestamps like 0:20, 00:20, 1:02:15 and ranges like 0:20-0:35 or 0:20 - 0:35
+    const regex = /(\b\d{1,2}:\d{2}(?::\d{2})?\b)(?:\s*[-–—]\s*(\d{1,2}:\d{2}(?::\d{2})?\b))?/g;
+    return text.replace(regex, (match, start, end) => {
+      const startSeconds = parseTimestamp(start);
+      if (startSeconds === null) return match;
+
+      const link = `https://www.youtube.com/watch?v=${videoId}&t=${startSeconds}s`;
+      if (!end) return `[${start}](${link})`;
+
+      const endSeconds = parseTimestamp(end);
+      if (endSeconds === null) return `[${start}](${link}) — ${end}`;
+
+      // Render range as two clickable timestamps (start + end)
+      return `[${start}](${link}) – [${end}](https://www.youtube.com/watch?v=${videoId}&t=${endSeconds}s)`;
+    });
+  };
+
 
   const copyToClipboard = async (text: string) => {
     try {
@@ -115,14 +144,142 @@ export default function Dashboard() {
   const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([]);
   const [chatQuestion, setChatQuestion] = useState("");
   const [chatAnswer, setChatAnswer] = useState<string | null>(null);
+  const [chatHistory, setChatHistory] = useState<Array<{ question: string; answer: string }>>([]);
+  const [chatIndex, setChatIndex] = useState(-1);
   const [chatLoading, setChatLoading] = useState(false);
+  const [chatFullScreen, setChatFullScreen] = useState(false);
+  const [fullScreenTutorMode, setFullScreenTutorMode] = useState(false);
   const [transcriptText, setTranscriptText] = useState("");
+
+  const normalizeMathMarkdown = (text: string, videoId?: string) => {
+    // Convert output into clean Markdown that separates math from descriptive text.
+    // Math is rendered inline using $...$ so surrounding text remains normal.
+    const withLinks = videoId ? linkifyTimestamps(text, videoId) : text;
+
+    const normalizeSpokenMath = (input: string) =>
+      input
+        .replace(/\bsine squared\s+([A-Za-z0-9])/gi, "\\sin^2 $1")
+        .replace(/\bsine squared\b/gi, "\\sin^2")
+        .replace(/\bsine\b/gi, "\\sin")
+        .replace(/\bcos\b/gi, "\\cos")
+        .replace(/\bcosine\b/gi, "\\cos")
+        .replace(/\btan\b/gi, "\\tan")
+        .replace(/\btangent\b/gi, "\\tan")
+        .replace(/\btheta\b/gi, "\\theta")
+        .replace(/\bpi\b/gi, "\\pi")
+        .replace(/\bdelta\b/gi, "\\delta");
+
+    const normalizeCasualEquation = (line: string) =>
+      line
+        .replace(/\bis\b/gi, "=")
+        .replace(/\bequals\b/gi, "=")
+        .replace(/\bplus\b/gi, "+")
+        .replace(/\bminus\b/gi, "-")
+        .replace(/\btimes\b/gi, "*")
+        .replace(/\bdivided by\b/gi, "/")
+        .replace(/\bover\b/gi, "/");
+
+    const normalizeFraction = (line: string) =>
+      line.replace(/\b(\d+)\s*\/\s*(\d+)\b/g, "\\frac{$1}{$2}");
+
+    const normalizeTrig = (line: string) =>
+      line
+        .replace(/\\cos\s*(\d+)x/gi, "\\cos($1x)")
+        .replace(/\\sin\s*(\d+)x/gi, "\\sin($1x)");
+
+    // Simplify common formatting patterns into nicer LaTeX.
+    const normalizeCommonIdentities = (line: string) =>
+      line
+        .replace(/\\frac\{1\}\{2\}\s*\*\s*1\s*-\s*\\cos\((\d+)x\)/gi, "\\frac{1-\\cos($1x)}{2}")
+        .replace(/\\frac\{1\}\{2\}\s*\*\s*1\s*-\s*\\cos\s*(\d+)x/gi, "\\frac{1-\\cos($1x)}{2}");
+
+    const stripDollarSigns = (line: string) =>
+      line.replace(/\$/g, "").replace(/\u2061/g, ""); // remove stray $ and invisible function-application chars
+
+    const wrapMathInLine = (line: string) => {
+      // Remove any stray dollar-sign delimiters (some AI outputs are malformed).
+      const cleaned = stripDollarSigns(line);
+
+      // Protect URLs from being accidentally converted into math by our regexes.
+      const urlRegex = /https?:\/\/[\w\-\.\/%&=\?\+\#]+/g;
+      const urls: string[] = [];
+      const placeholder = (match: string) => {
+        const key = `__URL_${urls.length}__`;
+        urls.push(match);
+        return key;
+      };
+      const withoutUrls = cleaned.replace(urlRegex, placeholder);
+
+      const shouldConvert = /\b(sin|cos|tan|log|ln|\d+\/\d+|\^|=)\b/i.test(withoutUrls);
+      if (!shouldConvert) return cleaned;
+
+      const normalized = normalizeSpokenMath(normalizeCasualEquation(withoutUrls));
+      const fractioned = normalizeFraction(normalized);
+      const trigged = normalizeTrig(fractioned);
+      const simplified = normalizeCommonIdentities(trigged);
+
+      // Wrap detected math expressions in $...$ so KaTeX renders them cleanly.
+      // 1) Fractions (\frac{a}{b})
+      // 2) Common trig/power patterns (\sin^2 x, \cos 2x, etc.)
+      // 3) Operator expressions (a + b, 1/2 * x, etc.)
+      const wrapWithDollar = (text: string, regex: RegExp) =>
+        text
+          .split("$")
+          .map((segment, idx) => {
+            if (idx % 2 === 1) return segment; // already inside math
+            return segment.replace(regex, (m) => `$${m}$`);
+          })
+          .join("$");
+
+      const mathRegex = /[A-Za-z0-9\\][A-Za-z0-9\\^_{}()]*\s*(?:[+\-*/^]\s*[A-Za-z0-9\\][A-Za-z0-9\\^_{}()]*)+/g;
+
+      let out = simplified;
+      out = wrapWithDollar(out, /\\frac\{[^}]+\}\{[^}]+\}/g);
+      out = wrapWithDollar(out, /\\(?:sin|cos|tan|log|ln|theta|pi|delta)(?:\^\d+)?\s*[A-Za-z0-9()]+/g);
+      out = wrapWithDollar(out, mathRegex);
+
+      // Restore URLs that were stripped before math wrapping.
+      urls.forEach((url, idx) => {
+        out = out.replace(`__URL_${idx}__`, url);
+      });
+
+      return out;
+    };
+
+    return withLinks
+      .split("\n")
+      .flatMap((line) => {
+        const trimmed = line.trim();
+        if (!trimmed) return [line];
+        return [wrapMathInLine(line)];
+      })
+      .join("\n");
+  };
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const audioInputRef = useRef<HTMLInputElement | null>(null);
 
   const videoId = useMemo(() => {
-    return downloadState.response?.video_id || downloadState.response?.video_id;
+    // Some endpoints (PDF upload) return pdf_id instead of video_id.
+    // Normalize it so downstream logic can use a single identifier.
+    return (
+      downloadState.response?.video_id ||
+      downloadState.response?.pdf_id ||
+      downloadState.response?.job_id
+    );
   }, [downloadState.response]);
+
+  useEffect(() => {
+    if (!chatFullScreen) return;
+
+    const handleKeydown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setChatFullScreen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeydown);
+    return () => window.removeEventListener("keydown", handleKeydown);
+  }, [chatFullScreen]);
 
   const videoTitle = useMemo(() => {
     return downloadState.response?.video_title || downloadState.response?.title || "";
@@ -196,6 +353,7 @@ setAudioStatus("uploading");
 
       setTranscriptText(rawText);
       setCopyStatus("");
+      setShowTranscript(false); // Don't auto-show transcript; user must choose to view it
       if (inputMode !== "audio") {
         setStage("ready");
       }
@@ -283,7 +441,6 @@ setAudioStatus("uploading");
   const askQuestion = async (question: string) => {
     if (!videoId || !question.trim()) return;
     setChatLoading(true);
-    setChatAnswer(null);
 
     try {
       const res = await fetch(`${apiBase}/api/chat/ask`, {
@@ -295,7 +452,17 @@ setAudioStatus("uploading");
       if (!res.ok) {
         throw new Error(data?.detail || data?.message || "Failed to get answer");
       }
-      setChatAnswer(String(data.answer ?? "(No answer returned)"));
+
+      const answer = String(data.answer ?? "(No answer returned)");
+      setChatAnswer(answer);
+
+      // Add answer to history (support step-back navigation)
+      setChatHistory((prev) => {
+        const next = prev.slice(0, chatIndex + 1);
+        next.push({ question, answer });
+        return next;
+      });
+      setChatIndex((prev) => prev + 1);
     } catch (err) {
       setChatAnswer(`Error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -323,7 +490,6 @@ setAudioStatus("uploading");
     setCopyHint("");
   };
 
-  const canGenerateQuiz = !!videoId;
 
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
@@ -552,17 +718,6 @@ setAudioStatus("uploading");
                   >
                     Notes
                   </button>
-                  <button
-                    onClick={() => setActiveMode("quiz")}
-                    className={
-                      "rounded-xl px-4 py-2 text-sm font-medium " +
-                      (activeMode === "quiz"
-                        ? "bg-amber-500 text-slate-950"
-                        : "bg-transparent text-slate-200 hover:bg-slate-800/40")
-                    }
-                  >
-                    Quiz
-                  </button>
                 </div>
 
                 <div className="mt-auto rounded-xl border border-white/10 bg-slate-950/40 p-4 text-sm text-slate-200">
@@ -596,13 +751,11 @@ setAudioStatus("uploading");
             <main className="rounded-2xl border border-white/10 bg-slate-900/50 p-6">
               <div className="flex items-center justify-between">
                 <h2 className="text-xl font-semibold text-white">
-                  {activeMode === "progress"
-                    ? "Audio progress"
-                    : activeMode === "transcript"
-                    ? "Transcript"
-                    : activeMode === "notes"
-                    ? "Notes"
-                    : "Quiz"}
+                  {activeMode === "progress" 
+                    ? "Audio progress" 
+                    : activeMode === "transcript" 
+                    ? "Transcript" 
+                    : "Notes"}
                 </h2>
               </div>
 
@@ -718,9 +871,47 @@ setAudioStatus("uploading");
               )}
 
               {activeMode === "transcript" && (
-                <div className="mt-4 max-h-[60vh] overflow-y-auto rounded-xl border border-white/10 bg-slate-950/40 p-4 text-sm leading-relaxed text-slate-200">
+                <div className="mt-4 max-h-[60vh] rounded-xl border border-white/10 bg-slate-950/40 p-4 text-sm text-slate-200">
                   {transcriptText ? (
-                    <pre className="whitespace-pre-wrap">{transcriptText}</pre>
+                    <>
+                      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                        <div className="text-xs text-slate-400">Transcript available</div>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              copyToClipboard(transcriptText);
+                            }}
+                            className="rounded-full bg-white/10 px-3 py-1 text-xs text-slate-200 hover:bg-white/15"
+                          >
+                            Copy
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setTranscriptText("");
+                              setShowTranscript(false);
+                            }}
+                            className="rounded-full bg-white/10 px-3 py-1 text-xs text-slate-200 hover:bg-white/15"
+                          >
+                            Clear
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setShowTranscript((prev) => !prev)}
+                            className="rounded-full bg-white/10 px-3 py-1 text-xs text-slate-200 hover:bg-white/15"
+                          >
+                            {showTranscript ? "Hide" : "Show"} transcript
+                          </button>
+                        </div>
+                      </div>
+
+                      {showTranscript ? (
+                        <pre className="whitespace-pre-wrap">{transcriptText}</pre>
+                      ) : (
+                        <p className="text-slate-400">Transcript hidden. Click “Show transcript” to view.</p>
+                      )}
+                    </>
                   ) : (
                     <p className="text-slate-400">Transcript is empty.</p>
                   )}
@@ -741,29 +932,235 @@ setAudioStatus("uploading");
                 </div>
               )}
 
-              {activeMode === "quiz" && (
-                <div className="mt-4 rounded-xl border border-white/10 bg-slate-950/40 p-6">
-                  <QuizGenerator transcriptId={videoId} videoTitle={videoTitle || "YouTube Video"} />
-                </div>
-              )}
             </main>
 
             {/* Right Sidebar (Sage Assistant) */}
             <aside className="space-y-6 h-full">
               <div className="flex h-full flex-col rounded-2xl border border-white/10 bg-slate-800/50 p-5">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-white">Sage Assistant</h3>
-                  <span className="text-xs text-slate-400">AI Chat</span>
+                  <div>
+                    <h3 className="text-sm font-semibold text-white">Sage Assistant</h3>
+                    <span className="text-xs text-slate-400">AI Chat</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setChatFullScreen(true)}
+                    className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-slate-200 hover:bg-white/15"
+                    title="Expand chat"
+                  >
+                    <Maximize2 className="h-4 w-4" />
+                  </button>
                 </div>
 
                 <div className="mt-4 flex flex-1 flex-col overflow-hidden">
                   <div className="flex-1 space-y-4 overflow-y-auto pr-2">
-                    {chatAnswer ? (
-                      <div className="rounded-xl bg-slate-900/50 border border-white/10 p-4 text-sm text-slate-200">
-                        <div className="text-xs text-slate-400 mb-2">Answer</div>
-                        <div className="whitespace-pre-wrap">{chatAnswer}</div>
+                    {chatHistory.slice(0, chatIndex + 1).map((entry, idx) => (
+                      <div key={idx} className="space-y-2">
+                        <div className="flex justify-end">
+                          <div className="max-w-[80%] rounded-2xl bg-emerald-500/20 p-3 text-sm text-slate-200">
+                            <div className="text-xs text-slate-300 mb-1">You</div>
+                            <div className="whitespace-pre-wrap">{entry.question}</div>
+                          </div>
+                        </div>
+                        <div className="flex justify-start">
+                          <div className="max-w-[80%] rounded-2xl bg-slate-900/60 border border-white/10 p-3 text-sm text-slate-200">
+                            <div className="text-xs text-slate-400 mb-1">Sage</div>
+                            <div className="prose prose-invert max-w-none whitespace-pre-wrap">
+                              <ReactMarkdown
+                                remarkPlugins={[remarkMath]}
+                                rehypePlugins={[rehypeKatex]}
+                                components={{
+                                  a: ({ href, children }) => (
+                                    <a
+                                      href={href}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-blue-300 hover:text-blue-100"
+                                    >
+                                      {children}
+                                    </a>
+                                  ),
+                                }}
+                              >
+                                {normalizeMathMarkdown(entry.answer, videoId)}
+                              </ReactMarkdown>
+                            </div>
+                          </div>
+                        </div>
                       </div>
-                    ) : (
+                    ))}
+                    {chatHistory.length === 0 && (
+                      <div className="text-sm text-slate-400">Ask a question to get started.</div>
+                    )}
+                  </div>
+
+                  <div className="mt-4 border-t border-white/10 pt-4">
+                    <div className="text-xs uppercase tracking-wide text-slate-400">Quick Questions</div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {suggestedQuestions.slice(0, 6).map((q) => (
+                        <button
+                          key={q}
+                          onClick={() => {
+                            setChatQuestion(q);
+                            askQuestion(q);
+                          }}
+                          className="rounded-full bg-slate-800/60 px-3 py-1 text-xs text-slate-200 hover:bg-slate-800"
+                        >
+                          {q}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="mt-4 flex gap-2">
+                      <input
+                        value={chatQuestion}
+                        onChange={(e) => setChatQuestion(e.target.value)}
+                        placeholder="Ask the Sage..."
+                        className="flex-1 rounded-xl border border-white/10 bg-slate-950/40 px-4 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                      />
+                      {chatIndex > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const prevIndex = chatIndex - 1;
+                            const prev = chatHistory[prevIndex];
+                            if (prev) {
+                              setChatIndex(prevIndex);
+                              setChatQuestion(prev.question);
+                              setChatAnswer(prev.answer);
+                            }
+                          }}
+                          className="rounded-xl bg-slate-700 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-slate-600"
+                        >
+                          Back
+                        </button>
+                      )}
+                      <button
+                        onClick={() => askQuestion(chatQuestion)}
+                        disabled={!chatQuestion.trim() || chatLoading}
+                        className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
+                      >
+                        {chatLoading ? "Thinking..." : "Send"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </aside>
+          </div>
+        )}
+      <div
+        className={
+          "fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xl p-6 transition-opacity duration-300 ease-out " +
+          (chatFullScreen
+            ? "opacity-100 pointer-events-auto"
+            : "opacity-0 pointer-events-none")
+        }
+        aria-hidden={!chatFullScreen}
+      >
+        <div
+          className={
+            "relative flex h-[92vh] w-[92vw] max-w-[1200px] overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950/90 via-slate-900/80 to-slate-950/90 shadow-2xl ring-1 ring-white/10 transition-transform duration-300 " +
+            (chatFullScreen ? "scale-100" : "scale-95")
+          }
+        >
+            <div className="absolute right-3 top-3 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setChatFullScreen(false)}
+                className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-900/70 text-slate-100 hover:bg-slate-800"
+                title="Close full screen"
+              >
+                <Minimize2 className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div
+              className={
+                "grid h-full w-full " +
+                (fullScreenTutorMode ? "grid-cols-1 lg:grid-cols-[40%_60%]" : "grid-cols-1")
+              }
+            >
+              {/* Transcript (left side) */}
+              {fullScreenTutorMode && (
+                <div className="border-r border-white/10 p-6 overflow-y-auto">
+                  <h3 className="text-sm font-semibold text-white">Transcript</h3>
+                  <p className="text-xs text-slate-400 mb-4">View transcript while chatting (Tutor Mode)</p>
+                  {transcriptText ? (
+                    <div className="prose prose-invert max-w-none leading-relaxed">
+                      <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                        {transcriptText}
+                      </ReactMarkdown>
+                    </div>
+                  ) : (
+                    <p className="text-slate-400">Transcript is empty.</p>
+                  )}
+                </div>
+              )}
+
+              {/* Chat (right side) */}
+              <div
+                className={
+                  "flex flex-col overflow-hidden bg-slate-950/80 " +
+                  (fullScreenTutorMode ? "" : "px-6 py-4")
+                }
+              >
+                <div className="flex items-center justify-between gap-3 border-b border-white/10 px-6 py-4">
+                  <div>
+                    <h3 className="text-sm font-semibold text-white">Sage Assistant</h3>
+                    <span className="text-xs text-slate-400">AI Chat</span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setFullScreenTutorMode((prev) => !prev)}
+                      className={
+                        "flex h-8 items-center gap-2 rounded-full px-3 text-xs font-semibold " +
+                        (fullScreenTutorMode
+                          ? "bg-emerald-500 text-slate-950"
+                          : "bg-white/10 text-slate-200 hover:bg-white/15")
+                      }
+                      title="Toggle transcript view"
+                    >
+                      <span>Transcript</span>
+                      <span className="text-xs">{fullScreenTutorMode ? "On" : "Off"}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setChatFullScreen(false)}
+                      className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-900/70 text-slate-100 hover:bg-slate-800"
+                      title="Exit full screen"
+                    >
+                      <Minimize2 className="h-5 w-5" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex flex-1 flex-col overflow-hidden px-6 py-4">
+                  <div className="flex-1 overflow-y-auto pr-2 space-y-4">
+                    {chatHistory.slice(0, chatIndex + 1).map((entry, idx) => (
+                      <div key={idx} className="space-y-2">
+                        <div className="flex justify-end">
+                          <div className="max-w-[80%] rounded-2xl bg-emerald-500/20 p-3 text-sm text-slate-200">
+                            <div className="text-xs text-slate-300 mb-1">You</div>
+                            <div className="whitespace-pre-wrap">{entry.question}</div>
+                          </div>
+                        </div>
+                        <div className="flex justify-start">
+                          <div className="max-w-[80%] rounded-2xl bg-slate-900/60 border border-white/10 p-3 text-sm text-slate-200">
+                            <div className="text-xs text-slate-400 mb-1">Sage</div>
+                            <div className="prose prose-invert max-w-none whitespace-pre-wrap">
+                              <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                                {normalizeMathMarkdown(entry.answer, videoId)}
+                              </ReactMarkdown>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    {chatHistory.length === 0 && (
                       <div className="text-sm text-slate-400">Ask a question to get started.</div>
                     )}
                   </div>
@@ -803,9 +1200,9 @@ setAudioStatus("uploading");
                   </div>
                 </div>
               </div>
-            </aside>
+            </div>
           </div>
-        )}
+        </div>
       </main>
     </div>
   );

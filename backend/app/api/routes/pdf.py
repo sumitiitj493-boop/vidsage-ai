@@ -38,6 +38,7 @@ async def upload_pdf(file: UploadFile = File(...)):
         return {
             "success": True,
             "pdf_id": pdf_id,  # Frontend should store this to chat later
+            "video_id": pdf_id,  # For frontend consistency with video/audio flows
             "filename": file.filename,
             "pages": len(segments),
             "message": "PDF processed successfully! Ready to chat."
