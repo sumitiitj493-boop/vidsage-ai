@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
+import remarkGfm from "remark-gfm";
 import rehypeKatex from "rehype-katex";
 import { CheckCircle2, Copy, FileText, Loader2, Maximize2, Minimize2, Mic, Upload } from "lucide-react";
 
@@ -150,6 +151,9 @@ export default function Dashboard() {
   const [chatFullScreen, setChatFullScreen] = useState(false);
   const [fullScreenTutorMode, setFullScreenTutorMode] = useState(false);
   const [transcriptText, setTranscriptText] = useState("");
+
+  const chatContainerRef = useRef<HTMLDivElement | null>(null);
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
 
   const normalizeMathMarkdown = (text: string, videoId?: string) => {
     // Convert output into clean Markdown that separates math from descriptive text.
@@ -402,6 +406,32 @@ setAudioStatus("uploading");
     }
   }, [activeMode, isAudioDone]);
 
+  // Auto-scroll chat to bottom when a new message is added
+  useEffect(() => {
+    if (!chatContainerRef.current) return;
+    chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+  }, [chatHistory, chatLoading]);
+
+  // Persist chat history locally so page reload doesn't lose context
+  useEffect(() => {
+    const stored = localStorage.getItem("vidsage_chat_history");
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          setChatHistory(parsed);
+          setChatIndex(parsed.length - 1);
+        }
+      } catch {
+        // ignore malformed stored value
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("vidsage_chat_history", JSON.stringify(chatHistory));
+  }, [chatHistory]);
+
   const pollAudioStatus = async (jobId: string) => {
     try {
       const res = await fetch(`${apiBase}/api/audio/status/${jobId}`);
@@ -463,6 +493,7 @@ setAudioStatus("uploading");
         return next;
       });
       setChatIndex((prev) => prev + 1);
+      setChatQuestion("");
     } catch (err) {
       setChatAnswer(`Error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -953,7 +984,7 @@ setAudioStatus("uploading");
                 </div>
 
                 <div className="mt-4 flex flex-1 flex-col overflow-hidden">
-                  <div className="flex-1 space-y-4 overflow-y-auto pr-2">
+                  <div ref={chatContainerRef} className="flex-1 space-y-4 overflow-y-auto pr-2">
                     {chatHistory.slice(0, chatIndex + 1).map((entry, idx) => (
                       <div key={idx} className="space-y-2">
                         <div className="flex justify-end">
@@ -967,7 +998,7 @@ setAudioStatus("uploading");
                             <div className="text-xs text-slate-400 mb-1">Sage</div>
                             <div className="prose prose-invert max-w-none whitespace-pre-wrap">
                               <ReactMarkdown
-                                remarkPlugins={[remarkMath]}
+                                remarkPlugins={[remarkMath, remarkGfm]}
                                 rehypePlugins={[rehypeKatex]}
                                 components={{
                                   a: ({ href, children }) => (
@@ -1011,37 +1042,56 @@ setAudioStatus("uploading");
                       ))}
                     </div>
 
-                    <div className="mt-4 flex gap-2">
-                      <input
-                        value={chatQuestion}
-                        onChange={(e) => setChatQuestion(e.target.value)}
-                        placeholder="Ask the Sage..."
-                        className="flex-1 rounded-xl border border-white/10 bg-slate-950/40 px-4 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
-                      />
-                      {chatIndex > 0 && (
+                    <div className="mt-4 flex flex-col gap-3">
+                      <div className="flex items-center gap-2">
+                        <input
+                          value={chatQuestion}
+                          onChange={(e) => setChatQuestion(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && !e.shiftKey && !chatLoading) {
+                              e.preventDefault();
+                              askQuestion(chatQuestion);
+                            }
+                          }}
+                          placeholder="Ask the Sage... (press Enter to send)"
+                          className="flex-1 rounded-xl border border-white/10 bg-slate-950/40 px-4 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                        />
+                        <button
+                          onClick={() => askQuestion(chatQuestion)}
+                          disabled={!chatQuestion.trim() || chatLoading}
+                          className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
+                        >
+                          {chatLoading ? "Thinking..." : "Send"}
+                        </button>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
                         <button
                           type="button"
                           onClick={() => {
-                            const prevIndex = chatIndex - 1;
-                            const prev = chatHistory[prevIndex];
-                            if (prev) {
-                              setChatIndex(prevIndex);
-                              setChatQuestion(prev.question);
-                              setChatAnswer(prev.answer);
-                            }
+                            setChatHistory([]);
+                            setChatIndex(-1);
+                            setChatAnswer(null);
+                            setChatQuestion("");
+                            localStorage.removeItem("vidsage_chat_history");
                           }}
-                          className="rounded-xl bg-slate-700 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-slate-600"
+                          className="rounded-full bg-white/10 px-3 py-1 text-xs text-slate-200 hover:bg-white/15"
                         >
-                          Back
+                          Clear chat
                         </button>
-                      )}
-                      <button
-                        onClick={() => askQuestion(chatQuestion)}
-                        disabled={!chatQuestion.trim() || chatLoading}
-                        className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
-                      >
-                        {chatLoading ? "Thinking..." : "Send"}
-                      </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const last = chatHistory[chatHistory.length - 1];
+                            if (last) askQuestion(last.question);
+                          }}
+                          disabled={chatHistory.length === 0 || chatLoading}
+                          className="rounded-full bg-white/10 px-3 py-1 text-xs text-slate-200 hover:bg-white/15 disabled:opacity-50"
+                        >
+                          Regenerate
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
