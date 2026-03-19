@@ -497,7 +497,32 @@ export default function Dashboard() {
           html2canvas: { scale: 2, useCORS: true },
           jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
         })
-        .save();
+        .toPdf()
+        .get("pdf")
+        .then((pdf: any) => {
+          const totalPages = pdf.internal.getNumberOfPages();
+          const now = new Date();
+          const headerText = `${videoTitle || "Notes"} • Generated ${now.toLocaleDateString()} ${now.toLocaleTimeString()}`;
+
+          pdf.setFontSize(9);
+          pdf.setTextColor(100);
+
+          for (let page = 1; page <= totalPages; page += 1) {
+            pdf.setPage(page);
+
+            // Header
+            pdf.text(headerText, 15, 12);
+
+            // Footer (page numbering)
+            const pageText = `Page ${page} / ${totalPages}`;
+            const { width } = pdf.internal.pageSize;
+            pdf.text(pageText, width - 15, pdf.internal.pageSize.getHeight() - 12, {
+              align: "right",
+            });
+          }
+
+          pdf.save(`${videoTitle || videoId || "notes"}.pdf`);
+        });
     } finally {
       container.remove();
     }
