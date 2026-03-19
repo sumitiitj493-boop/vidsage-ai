@@ -5,7 +5,6 @@ import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import remarkGfm from "remark-gfm";
 import rehypeKatex from "rehype-katex";
-import html2pdf from "html2pdf.js";
 import { CheckCircle2, Copy, FileText, Loader2, Maximize2, Minimize2, Mic, Upload } from "lucide-react";
 
 type VideoDownloadState = {
@@ -479,6 +478,10 @@ export default function Dashboard() {
 
     const html = getNotesHtml();
     if (!html) return;
+
+    if (typeof window === "undefined") return;
+
+    const html2pdf = (await import("html2pdf.js")).default;
 
     const container = document.createElement("div");
     container.style.position = "fixed";
