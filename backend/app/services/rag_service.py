@@ -5,8 +5,17 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from groq import Groq
 from app.config import settings
 import logging
+from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+
+class RateLimitError(Exception):
+    """Raised when the Groq API rate limit has been reached."""
+
+    def __init__(self, message: str, retry_after_seconds: Optional[int] = None):
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
 
 class RAGService:
     def __init__(self):
@@ -334,12 +343,26 @@ class RAGService:
         ]
         """
 
-        outline_resp = self.groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": outline_prompt}],
-            temperature=0.2,
-        )
-        outline_text = outline_resp.choices[0].message.content
+        try:
+            outline_resp = self.groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": outline_prompt}],
+                temperature=0.2,
+            )
+            outline_text = outline_resp.choices[0].message.content
+        except Exception as e:
+            # Detect Groq rate limit errors and raise a structured exception so the API can return a 429.
+            errmsg = str(e)
+            if "rate limit" in errmsg.lower() or "rate_limit_exceeded" in errmsg.lower():
+                import re
+
+                match = re.search(r"try again in ([0-9hms\.]+)", errmsg, re.IGNORECASE)
+                retry = match.group(1) if match else None
+                raise RateLimitError(
+                    f"Rate limit reached. Try again in {retry or 'a few minutes'}.",
+                    retry_after_seconds=None,
+                )
+            raise
 
         try:
             import json
@@ -396,12 +419,25 @@ class RAGService:
             Transcript:
             {chunk_text}
             """
-            resp = self.groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.2,
-            )
-            note = resp.choices[0].message.content.strip()
+            try:
+                resp = self.groq_client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.2,
+                )
+                note = resp.choices[0].message.content.strip()
+            except Exception as e:
+                errmsg = str(e)
+                if "rate limit" in errmsg.lower() or "rate_limit_exceeded" in errmsg.lower():
+                    import re
+
+                    match = re.search(r"try again in ([0-9hms\.]+)", errmsg, re.IGNORECASE)
+                    retry = match.group(1) if match else None
+                    raise RateLimitError(
+                        f"Rate limit reached. Try again in {retry or 'a few minutes'}.",
+                        retry_after_seconds=None,
+                    )
+                raise
 
             # Strip any accidental HTML tags, to keep output safe and Markdown-friendly.
             import re

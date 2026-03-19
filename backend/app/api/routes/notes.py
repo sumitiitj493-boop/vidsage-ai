@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from app.services.rag_service import rag_service
+from app.services.rag_service import RateLimitError, rag_service
 
 router = APIRouter(prefix="/api/notes", tags=["Notes"])
 
@@ -14,5 +14,10 @@ def generate_masterclass_notes(request: NotesRequest):
     try:
         notebook_json = rag_service.generate_masterclass_notebook(request.video_id)
         return notebook_json
+    except RateLimitError as rte:
+        raise HTTPException(
+            status_code=429,
+            detail=str(rte),
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
