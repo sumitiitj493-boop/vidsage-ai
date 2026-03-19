@@ -353,6 +353,8 @@ export default function Dashboard() {
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       margin: 0;
       padding: 2rem;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
     }
 
     a {
@@ -386,6 +388,7 @@ export default function Dashboard() {
 
     .notebook-cell {
       margin-bottom: 1.5rem;
+      page-break-inside: avoid;
     }
 
     .card {
@@ -407,6 +410,39 @@ export default function Dashboard() {
       border-radius: 10px;
       overflow-x: auto;
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+
+    @media print {
+      body {
+        background: white;
+        color: black;
+        padding: 1.5rem;
+      }
+
+      .notes-header {
+        background: white;
+        box-shadow: none;
+        border-left: 6px solid #a371f7;
+      }
+
+      .card {
+        background: white;
+        border: 1px solid #ccc;
+      }
+
+      a {
+        color: #000;
+        text-decoration: underline;
+      }
+
+      .notebook-cell {
+        page-break-inside: avoid;
+      }
+
+      .code-block {
+        background: #f4f4f4;
+        color: #111;
+      }
     }
   </style>
 </head>
@@ -447,6 +483,13 @@ export default function Dashboard() {
     printWindow.document.write(html);
     printWindow.document.close();
     printWindow.focus();
+
+    const handleAfterPrint = () => {
+      printWindow.close();
+    };
+
+    printWindow.addEventListener("afterprint", handleAfterPrint);
+
     // Delay to ensure styling loads before print.
     setTimeout(() => {
       printWindow.print();
