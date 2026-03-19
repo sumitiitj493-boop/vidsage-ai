@@ -355,10 +355,8 @@ class RAGService:
             "cell_type": "markdown",
             "metadata": {},
             "source": [
-                "<div style=\"background: linear-gradient(to right, #161b22, #0d1117); padding: 20px; border-left: 5px solid #a371f7; border-radius: 8px;\">",
-                "<h1 style=\"color: #c9d1d9; margin:0;\">🚀 Masterclass Notes</h1>",
-                "<p style=\"color: #8b949e; margin-top:5px;\">Generated from transcript.</p>",
-                "</div>\n",
+                "# 🚀 Masterclass Notes\n\n",
+                "Generated from transcript.\n",
             ],
         })
 
@@ -388,7 +386,12 @@ class RAGService:
         def create_note_cell(chunk_text: str, ts: str) -> dict:
             prompt = f"""
             Create a concise, engaging note snippet (3-5 bullet points) for this transcript chunk.
-            Include the timestamp in the first bullet.
+            Return the note in **valid Markdown only** (no HTML or styling tags).
+
+            - Start with a heading like `## Segment (0:00)`.
+            - Include the timestamp in the first bullet point.
+            - Use `*` or `-` for bullet points.
+            - Wrap any math or formulas using `$...$` (inline) or `$$...$$` (block).
 
             Transcript:
             {chunk_text}
@@ -399,16 +402,19 @@ class RAGService:
                 temperature=0.2,
             )
             note = resp.choices[0].message.content.strip()
-            note_html = note.replace("\n", "<br/>")
+
+            # Strip any accidental HTML tags, to keep output safe and Markdown-friendly.
+            import re
+
+            note = re.sub(r"<[^>]+>", "", note)
+            note = note.replace("\r\n", "\n").strip()
 
             return {
                 "cell_type": "markdown",
                 "metadata": {},
                 "source": [
-                    "<div style=\"background-color: #161b22; padding: 15px; border-radius: 10px; border: 1px solid #30363d; border-left: 5px solid #58a6ff;\">",
-                    f"<strong style=\"color: #58a6ff;\">📚 Segment ({ts})</strong><br/>",
-                    f"<span style=\"color: #c9d1d9;\">{note_html}</span>",
-                    "</div>\n",
+                    f"## Segment ({ts})\n\n",
+                    note + "\n",
                 ],
             }
 

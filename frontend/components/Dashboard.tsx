@@ -1108,14 +1108,19 @@ setAudioStatus("uploading");
 
                   {notesNotebook ? (
                     <div className="prose prose-invert max-w-none leading-relaxed">
-                      {notesNotebook.cells?.map((cell: any, idx: number) => (
-                        <div
-                          key={idx}
-                          dangerouslySetInnerHTML={{
-                            __html: Array.isArray(cell.source) ? cell.source.join("") : String(cell.source),
-                          }}
-                        />
-                      ))}
+                      {notesNotebook.cells?.map((cell: any, idx: number) => {
+                        const cellText = Array.isArray(cell.source) ? cell.source.join("") : String(cell.source);
+                        return (
+                          <div key={idx} className="notebook-cell">
+                            <ReactMarkdown
+                              remarkPlugins={[remarkMath, remarkGfm]}
+                              rehypePlugins={[rehypeKatex]}
+                            >
+                              {normalizeMathMarkdown(cellText, videoId)}
+                            </ReactMarkdown>
+                          </div>
+                        );
+                      })}
                     </div>
                   ) : (
                     <p className="text-slate-400">
