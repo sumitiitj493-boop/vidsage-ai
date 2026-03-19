@@ -293,5 +293,139 @@ class RAGService:
             logger.error(f"Error generating suggestions for {video_id}: {e}")
             return ["Summarize this video", "What are the main topics?", "Who is the speaker?"]
 
+    def generate_masterclass_notebook(self, video_id: str) -> dict:
+        """Generate a Jupyter Notebook (.ipynb) JSON for the given video.
+
+        This creates an outline template, then fills it in using chunked note generation
+        to stay within token and rate limits.
+        """
+        collection_name = f"video_{video_id}"
+
+        try:
+            collection = self.chroma_client.get_collection(collection_name)
+        except Exception:
+            raise ValueError("Video not indexed. Please process it first.")
+
+        # Fetch some chunks (limit for safety)
+        try:
+            results = collection.get(limit=50)
+        except Exception:
+            results = collection.get()
+
+        documents = results.get("documents", [])
+        metadatas = results.get("metadatas", [])
+        if not documents:
+            raise ValueError("No transcript chunks found for this video.")
+
+        # 1) Generate an outline template from the beginning of the transcript
+        outline_context = "\n\n".join(documents[:5])
+        outline_prompt = f"""
+        You are an expert educational content creator.
+        Create a concise outline (section titles + bullet points) for masterclass notes.
+        Use the transcript below to infer main topics and subtopics.
+
+        Transcript:
+        {outline_context}
+
+        OUTPUT (JSON):
+        [
+          {{"section": "Title", "bullets": ["...", "..."]}},
+          ...
+        ]
+        """
+
+        outline_resp = self.groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": outline_prompt}],
+            temperature=0.2,
+        )
+        outline_text = outline_resp.choices[0].message.content
+
+        try:
+            import json
+            outline = json.loads(outline_text)
+            if not isinstance(outline, list):
+                outline = [{"section": "Notes", "bullets": []}]
+        except Exception:
+            outline = [{"section": "Notes", "bullets": []}]
+
+        cells = []
+        # Title header
+        cells.append({
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "<div style=\"background: linear-gradient(to right, #161b22, #0d1117); padding: 20px; border-left: 5px solid #a371f7; border-radius: 8px;\">",
+                "<h1 style=\"color: #c9d1d9; margin:0;\">🚀 Masterclass Notes</h1>",
+                "<p style=\"color: #8b949e; margin-top:5px;\">Generated from transcript.</p>",
+                "</div>\n",
+            ],
+        })
+
+        # Outline cell
+        outline_lines = ["## In This Lecture\n"]
+        for entry in outline:
+            section_title = entry.get("section")
+            bullets = entry.get("bullets", [])
+            outline_lines.append(f"- **{section_title}**")
+            for b in bullets:
+                outline_lines.append(f"  - {b}")
+        cells.append({
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": ["\n".join(outline_lines) + "\n"],
+        })
+
+        def format_ts(start: float) -> str:
+            try:
+                seconds = int(float(start))
+                m, s = divmod(seconds, 60)
+                h, m = divmod(m, 60)
+                return f"{h}:{m:02d}:{s:02d}" if h > 0 else f"{m}:{s:02d}"
+            except Exception:
+                return "0:00"
+
+        def create_note_cell(chunk_text: str, ts: str) -> dict:
+            prompt = f"""
+            Create a concise, engaging note snippet (3-5 bullet points) for this transcript chunk.
+            Include the timestamp in the first bullet.
+
+            Transcript:
+            {chunk_text}
+            """
+            resp = self.groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2,
+            )
+            note = resp.choices[0].message.content.strip()
+            note_html = note.replace("\n", "<br/>")
+
+            return {
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": [
+                    "<div style=\"background-color: #161b22; padding: 15px; border-radius: 10px; border: 1px solid #30363d; border-left: 5px solid #58a6ff;\">",
+                    f"<strong style=\"color: #58a6ff;\">📚 Segment ({ts})</strong><br/>",
+                    f"<span style=\"color: #c9d1d9;\">{note_html}</span>",
+                    "</div>\n",
+                ],
+            }
+
+        for idx, doc in enumerate(documents):
+            meta = metadatas[idx] if idx < len(metadatas) else {}
+            start = meta.get("start", 0)
+            ts = format_ts(start)
+            cells.append(create_note_cell(doc, ts))
+
+        notebook = {
+            "nbformat": 4,
+            "nbformat_minor": 5,
+            "metadata": {"kernelspec": {"name": "python3", "language": "python"}},
+            "cells": cells,
+        }
+        return notebook
+
 # Singleton Instance
+rag_service = RAGService()
 rag_service = RAGService()

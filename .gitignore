@@ -9,6 +9,8 @@ venv/
 # Node
 node_modules/
 .next/
+# TypeScript build info
+tsconfig.tsbuildinfo
 
 # OS
 .DS_Store

@@ -151,6 +151,9 @@ export default function Dashboard() {
   const [chatFullScreen, setChatFullScreen] = useState(false);
   const [fullScreenTutorMode, setFullScreenTutorMode] = useState(false);
   const [transcriptText, setTranscriptText] = useState("");
+  const [notesNotebook, setNotesNotebook] = useState<any | null>(null);
+  const [notesLoading, setNotesLoading] = useState(false);
+  const [notesError, setNotesError] = useState<string | null>(null);
 
   const chatContainerRef = useRef<HTMLDivElement | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
@@ -292,6 +295,112 @@ export default function Dashboard() {
   const isReady = stage === "ready";
 
   const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+
+  const fetchMasterclassNotes = async () => {
+    if (!videoId) return;
+    setNotesLoading(true);
+    setNotesError(null);
+
+    try {
+      const res = await fetch(`${apiBase}/api/notes/masterclass`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ video_id: videoId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.detail || data?.message || "Failed to generate notes");
+      setNotesNotebook(data);
+    } catch (e: any) {
+      setNotesError(e?.message || String(e));
+    } finally {
+      setNotesLoading(false);
+    }
+  };
+
+  const downloadNotesNotebook = () => {
+    if (!notesNotebook) return;
+    const blob = new Blob([JSON.stringify(notesNotebook, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${videoTitle || videoId || "notes"}.ipynb`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const getNotesHtml = () => {
+    if (!notesNotebook) return "";
+    const cellsHtml = notesNotebook.cells
+      ?.map((cell: any) => {
+        if (!cell || cell.cell_type !== "markdown") return "";
+        const src = Array.isArray(cell.source) ? cell.source.join("") : String(cell.source);
+        return src;
+      })
+      .join("\n");
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${videoTitle || "Notes"}</title>
+  <style>
+    body { background: #0b1220; color: #c9d1d9; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding: 2rem; }
+    a { color: #58a6ff; }
+    h1, h2, h3 { color: #f0f6fc; }
+    .notebook-cell { margin-bottom: 1.5rem; }
+  </style>
+</head>
+<body>
+  ${cellsHtml}
+</body>
+</html>`;
+  };
+
+  const downloadNotesHtml = () => {
+    const html = getNotesHtml();
+    if (!html) return;
+
+    const blob = new Blob([html], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${videoTitle || videoId || "notes"}.html`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const printNotesPdf = () => {
+    const html = getNotesHtml();
+    if (!html) return;
+
+    const printWindow = window.open("", "_blank", "width=900,height=800");
+    if (!printWindow) return;
+
+    printWindow.document.write(html);
+    printWindow.document.close();
+    printWindow.focus();
+    // Delay to ensure styling loads before print.
+    setTimeout(() => {
+      printWindow.print();
+    }, 250);
+  };
+
+  useEffect(() => {
+    // Reset notes when switching to a different video.
+    setNotesNotebook(null);
+    setNotesError(null);
+  }, [videoId]);
+
+  useEffect(() => {
+    if (activeMode === "notes" && videoId && !notesNotebook && !notesLoading) {
+      fetchMasterclassNotes();
+    }
+  }, [activeMode, videoId]);
 
   const handleProcessVideo = async () => {
     setStage("processing");
@@ -951,14 +1060,67 @@ setAudioStatus("uploading");
 
               {activeMode === "notes" && (
                 <div className="mt-4 rounded-xl border border-white/10 bg-slate-950/40 p-6 text-sm text-slate-200">
-                  <div className="text-sm text-slate-400 mb-2">Notes (Markdown)</div>
-                  {transcriptText ? (
-                    <div
-                      className="prose prose-invert max-w-none leading-relaxed"
-                      dangerouslySetInnerHTML={{ __html: markdownToHtml(transcriptText) }}
-                    />
+                  <div className="text-sm text-slate-400 mb-2">Notes</div>
+
+                  <div className="flex flex-wrap gap-2 mb-4">
+                    <button
+                      type="button"
+                      onClick={fetchMasterclassNotes}
+                      disabled={!videoId || notesLoading}
+                      className="rounded-full bg-emerald-500 px-3 py-1 text-xs font-medium text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
+                    >
+                      {notesLoading
+                        ? "Generating notes…"
+                        : notesNotebook
+                        ? "Regenerate notes"
+                        : "Generate notes"}
+                    </button>
+                    {notesNotebook && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={downloadNotesNotebook}
+                          className="rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-slate-200 hover:bg-white/15"
+                        >
+                          Download .ipynb
+                        </button>
+                        <button
+                          type="button"
+                          onClick={downloadNotesHtml}
+                          className="rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-slate-200 hover:bg-white/15"
+                        >
+                          Download HTML
+                        </button>
+                        <button
+                          type="button"
+                          onClick={printNotesPdf}
+                          className="rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-slate-200 hover:bg-white/15"
+                        >
+                          Print / Save PDF
+                        </button>
+                      </>
+                    )}
+                  </div>
+
+                  {notesError && (
+                    <p className="text-sm text-red-400 mb-3">Error generating notes: {notesError}</p>
+                  )}
+
+                  {notesNotebook ? (
+                    <div className="prose prose-invert max-w-none leading-relaxed">
+                      {notesNotebook.cells?.map((cell: any, idx: number) => (
+                        <div
+                          key={idx}
+                          dangerouslySetInnerHTML={{
+                            __html: Array.isArray(cell.source) ? cell.source.join("") : String(cell.source),
+                          }}
+                        />
+                      ))}
+                    </div>
                   ) : (
-                    <p className="text-slate-400">No transcript available yet.</p>
+                    <p className="text-slate-400">
+                      Click “Generate notes” to fetch the masterclass notebook (.ipynb) for this video.
+                    </p>
                   )}
                 </div>
               )}
