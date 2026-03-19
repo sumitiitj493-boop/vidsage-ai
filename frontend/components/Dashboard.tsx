@@ -347,14 +347,77 @@ export default function Dashboard() {
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${videoTitle || "Notes"}</title>
   <style>
-    body { background: #0b1220; color: #c9d1d9; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding: 2rem; }
-    a { color: #58a6ff; }
-    h1, h2, h3 { color: #f0f6fc; }
-    .notebook-cell { margin-bottom: 1.5rem; }
+    body {
+      background: #0d1117;
+      color: #c9d1d9;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 0;
+      padding: 2rem;
+    }
+
+    a {
+      color: #58a6ff;
+    }
+
+    h1, h2, h3 {
+      color: #f0f6fc;
+    }
+
+    .notes-header {
+      background: linear-gradient(135deg, #0d1117 0%, #161b22 50%, #1a1f29 100%);
+      padding: 24px;
+      border-left: 6px solid #a371f7;
+      border-radius: 12px;
+      margin-bottom: 24px;
+      box-shadow: 0 4px 15px rgba(163, 113, 247, 0.2);
+    }
+
+    .notes-header h1 {
+      margin: 0;
+      font-size: 2.25rem;
+    }
+
+    .notes-header p {
+      margin: 8px 0 0;
+      color: #a371f7;
+      font-size: 1.1rem;
+      font-weight: 600;
+    }
+
+    .notebook-cell {
+      margin-bottom: 1.5rem;
+    }
+
+    .card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 12px;
+      padding: 18px;
+      margin-bottom: 18px;
+    }
+
+    .card h2 {
+      margin-top: 0;
+      color: #58a6ff;
+    }
+
+    .code-block {
+      background: rgba(13, 17, 23, 0.9);
+      padding: 16px;
+      border-radius: 10px;
+      overflow-x: auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
   </style>
 </head>
 <body>
-  ${cellsHtml}
+  <div class="notes-header">
+    <h1>🚀 Masterclass Notes</h1>
+    <p>Generated from transcript</p>
+  </div>
+  <div class="card">
+    ${cellsHtml}
+  </div>
 </body>
 </html>`;
   };
@@ -1059,74 +1122,79 @@ setAudioStatus("uploading");
               )}
 
               {activeMode === "notes" && (
-                <div className="mt-4 rounded-xl border border-white/10 bg-slate-950/40 p-6 text-sm text-slate-200">
-                  <div className="text-sm text-slate-400 mb-2">Notes</div>
-
-                  <div className="flex flex-wrap gap-2 mb-4">
-                    <button
-                      type="button"
-                      onClick={fetchMasterclassNotes}
-                      disabled={!videoId || notesLoading}
-                      className="rounded-full bg-emerald-500 px-3 py-1 text-xs font-medium text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
-                    >
-                      {notesLoading
-                        ? "Generating notes…"
-                        : notesNotebook
-                        ? "Regenerate notes"
-                        : "Generate notes"}
-                    </button>
-                    {notesNotebook && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={downloadNotesNotebook}
-                          className="rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-slate-200 hover:bg-white/15"
-                        >
-                          Download .ipynb
-                        </button>
-                        <button
-                          type="button"
-                          onClick={downloadNotesHtml}
-                          className="rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-slate-200 hover:bg-white/15"
-                        >
-                          Download HTML
-                        </button>
-                        <button
-                          type="button"
-                          onClick={printNotesPdf}
-                          className="rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-slate-200 hover:bg-white/15"
-                        >
-                          Print / Save PDF
-                        </button>
-                      </>
-                    )}
+                <div className="mt-4">
+                  <div className="rounded-2xl bg-gradient-to-r from-[#0d1117] via-[#161b22] to-[#1a1f29] border-l-4 border-purple-400 p-6 shadow-lg shadow-purple-500/10">
+                    <h2 className="text-2xl font-semibold text-white">🚀 Masterclass Notes</h2>
+                    <p className="mt-2 text-sm text-purple-200">Generated from transcript. Click “Generate notes” to refresh.</p>
                   </div>
 
-                  {notesError && (
-                    <p className="text-sm text-red-400 mb-3">Error generating notes: {notesError}</p>
-                  )}
-
-                  {notesNotebook ? (
-                    <div className="prose prose-invert max-w-none leading-relaxed">
-                      {notesNotebook.cells?.map((cell: any, idx: number) => {
-                        const cellText = Array.isArray(cell.source) ? cell.source.join("") : String(cell.source);
-                        return (
-                          <div key={idx} className="notebook-cell">
-                            <ReactMarkdown
-                              remarkPlugins={[remarkMath, remarkGfm]}
-                              rehypePlugins={[rehypeKatex]}
-                            >
-                              {normalizeMathMarkdown(cellText, videoId)}
-                            </ReactMarkdown>
-                          </div>
-                        );
-                      })}
+                  <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/40 p-6 text-sm text-slate-200">
+                    <div className="flex flex-wrap gap-2 mb-4">
+                      <button
+                        type="button"
+                        onClick={fetchMasterclassNotes}
+                        disabled={!videoId || notesLoading}
+                        className="rounded-full bg-emerald-500 px-3 py-1 text-xs font-medium text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
+                      >
+                        {notesLoading
+                          ? "Generating notes…"
+                          : notesNotebook
+                          ? "Regenerate notes"
+                          : "Generate notes"}
+                      </button>
+                      {notesNotebook && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={downloadNotesNotebook}
+                            className="rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-slate-200 hover:bg-white/15"
+                          >
+                            Download .ipynb
+                          </button>
+                          <button
+                            type="button"
+                            onClick={downloadNotesHtml}
+                            className="rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-slate-200 hover:bg-white/15"
+                          >
+                            Download HTML
+                          </button>
+                          <button
+                            type="button"
+                            onClick={printNotesPdf}
+                            className="rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-slate-200 hover:bg-white/15"
+                          >
+                            Print / Save PDF
+                          </button>
+                        </>
+                      )}
                     </div>
-                  ) : (
-                    <p className="text-slate-400">
-                      Click “Generate notes” to fetch the masterclass notebook (.ipynb) for this video.
-                    </p>
-                  )}
+
+                    {notesError && (
+                      <p className="text-sm text-red-400 mb-3">Error generating notes: {notesError}</p>
+                    )}
+
+                    {notesNotebook ? (
+                      <div className="prose prose-invert max-w-none leading-relaxed">
+                        {notesNotebook.cells?.map((cell: any, idx: number) => {
+                          const cellText = Array.isArray(cell.source) ? cell.source.join("") : String(cell.source);
+                          return (
+                            <div key={idx} className="notebook-cell">
+                              <ReactMarkdown
+                                remarkPlugins={[remarkMath, remarkGfm]}
+                                rehypePlugins={[rehypeKatex]}
+                              >
+                                {normalizeMathMarkdown(cellText, videoId)}
+                              </ReactMarkdown>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-slate-400">
+                        Click “Generate notes” to fetch the masterclass notebook (.ipynb) for this video.
+                      </p>
+                    )}
+                  </div>
                 </div>
               )}
 
