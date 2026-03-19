@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import remarkGfm from "remark-gfm";
 import rehypeKatex from "rehype-katex";
+import html2pdf from "html2pdf.js";
 import { CheckCircle2, Copy, FileText, Loader2, Maximize2, Minimize2, Mic, Upload } from "lucide-react";
 
 type VideoDownloadState = {
@@ -471,6 +472,35 @@ export default function Dashboard() {
     anchor.click();
     anchor.remove();
     URL.revokeObjectURL(url);
+  };
+
+  const downloadNotesPdfDirect = async () => {
+    if (!notesNotebook) return;
+
+    const html = getNotesHtml();
+    if (!html) return;
+
+    const container = document.createElement("div");
+    container.style.position = "fixed";
+    container.style.top = "-9999px";
+    container.style.width = "1024px";
+    container.innerHTML = html;
+    document.body.appendChild(container);
+
+    try {
+      await html2pdf()
+        .from(container)
+        .set({
+          margin: 10,
+          filename: `${videoTitle || videoId || "notes"}.pdf`,
+          image: { type: "jpeg", quality: 0.98 },
+          html2canvas: { scale: 2, useCORS: true },
+          jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+        })
+        .save();
+    } finally {
+      container.remove();
+    }
   };
 
   const printNotesPdf = () => {
@@ -1203,10 +1233,17 @@ setAudioStatus("uploading");
                           </button>
                           <button
                             type="button"
+                            onClick={downloadNotesPdfDirect}
+                            className="rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-slate-200 hover:bg-white/15"
+                          >
+                            Download PDF
+                          </button>
+                          <button
+                            type="button"
                             onClick={printNotesPdf}
                             className="rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-slate-200 hover:bg-white/15"
                           >
-                            Print / Save PDF
+                            Print (Dialog)
                           </button>
                         </>
                       )}
