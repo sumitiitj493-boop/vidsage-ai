@@ -9,11 +9,6 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from groq import Groq
 
 from app.config import settings
-<<<<<<< HEAD
-import logging
-from typing import Optional
-=======
->>>>>>> f4f49a7 (UI sparkle + OpenRouter fallback + upload audio UX polish)
 
 logger = logging.getLogger(__name__)
 
@@ -339,7 +334,7 @@ class RAGService:
         except:
             return "0:00"
 
-    def answer_question(self, video_id: str, question: str) -> str:
+    def answer_question(self, video_id: str, question: str, output_format: str = "markdown") -> str:
         """
         EXAM MODE: Retrieves context and answers the question.
         Returns the answer or an error message.
@@ -431,12 +426,20 @@ class RAGService:
             AI TUTOR ANSWER:
             """
             
-            # 3. Generation (Call LLM — Groq with optional Ollama fallback)
-            return self.chat_completion(
+            if output_format.lower() == "latex":
+                prompt += "\n\nIMPORTANT: Provide the answer in valid LaTeX only. Use `\\text{...}` for prose and standard LaTeX math for formulas. Do not include markdown or HTML."
+
+            answer = self.chat_completion(
                 messages=[{"role": "user", "content": prompt}],
                 model="llama-3.3-70b-versatile",
                 temperature=0.1,  # Strict mode
             )
+
+            if output_format.lower() == "latex":
+                # Ensure it is LaTeX-friendly by wrapping plain text in \text{}
+                return answer.strip()
+
+            return answer
             
         except Exception as e:
             logger.error(f"Error answering question for video {video_id}: {str(e)}")
@@ -659,7 +662,6 @@ class RAGService:
         ]
         """
 
-<<<<<<< HEAD
         try:
             outline_resp = self.groq_client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
@@ -679,14 +681,12 @@ class RAGService:
                     f"Rate limit reached. Try again in {retry or 'a few minutes'}.",
                     retry_after_seconds=None,
                 )
-            raise
-=======
-        outline_text = self.chat_completion(
-            messages=[{"role": "user", "content": outline_prompt}],
-            model="llama-3.3-70b-versatile",
-            temperature=0.2,
-        )
->>>>>>> f4f49a7 (UI sparkle + OpenRouter fallback + upload audio UX polish)
+            # fallback to OpenRouter for outline generation if Groq cannot respond.
+            outline_text = self.chat_completion(
+                messages=[{"role": "user", "content": outline_prompt}],
+                model="llama-3.3-70b-versatile",
+                temperature=0.2,
+            )
 
         try:
             import json
@@ -743,7 +743,6 @@ class RAGService:
             Transcript:
             {chunk_text}
             """
-<<<<<<< HEAD
             try:
                 resp = self.groq_client.chat.completions.create(
                     model="llama-3.3-70b-versatile",
@@ -762,21 +761,22 @@ class RAGService:
                         f"Rate limit reached. Try again in {retry or 'a few minutes'}.",
                         retry_after_seconds=None,
                     )
-                raise
+
+                # fallback: use OpenRouter if Groq fails for note creation.
+                note = self._openrouter_generate(
+                    prompt=prompt,
+                    model=self.openrouter_model,
+                    temperature=0.2,
+                    max_tokens=256,
+                ).strip()
 
             # Strip any accidental HTML tags, to keep output safe and Markdown-friendly.
             import re
 
-            note = re.sub(r"<[^>]+>", "", note)
+            note = re.sub(r"<[^>]+>", "", note).strip()
             note = note.replace("\r\n", "\n").strip()
-=======
-            note = self.chat_completion(
-                messages=[{"role": "user", "content": prompt}],
-                model="llama-3.3-70b-versatile",
-                temperature=0.2,
-            ).strip()
-            note_html = note.replace("\n", "<br/>")
->>>>>>> f4f49a7 (UI sparkle + OpenRouter fallback + upload audio UX polish)
+            if not note:
+                note = "*No note could be generated.*"
 
             return {
                 "cell_type": "markdown",

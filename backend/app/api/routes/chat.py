@@ -8,13 +8,14 @@ router = APIRouter(prefix="/api/chat", tags=["Chat with Video"])
 class ChatRequest(BaseModel):
     video_id: str
     question: str
+    format: str = "markdown"  # markdown | latex
 
 @router.post("/ask")
 def ask_video(request: ChatRequest):
     """
     Ask a question about a specific processed video.
     """
-    answer = rag_service.answer_question(request.video_id, request.question)
+    answer = rag_service.answer_question(request.video_id, request.question, output_format=request.format)
     return {"answer": answer}
 
 

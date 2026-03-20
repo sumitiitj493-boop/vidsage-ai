@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import remarkGfm from "remark-gfm";
 import rehypeKatex from "rehype-katex";
+import katex from "katex";
 import { CheckCircle2, Copy, FileText, Loader2, Maximize2, Minimize2, Mic, Upload } from "lucide-react";
 
 type VideoDownloadState = {
@@ -145,11 +146,12 @@ export default function Dashboard() {
   const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([]);
   const [chatQuestion, setChatQuestion] = useState("");
   const [chatAnswer, setChatAnswer] = useState<string | null>(null);
-  const [chatHistory, setChatHistory] = useState<Array<{ question: string; answer: string }>>([]);
+  const [chatHistory, setChatHistory] = useState<Array<{ question: string; answer: string; format: "markdown" | "latex" }>>([]);
   const [chatIndex, setChatIndex] = useState(-1);
   const [chatLoading, setChatLoading] = useState(false);
   const [chatFullScreen, setChatFullScreen] = useState(false);
   const [fullScreenTutorMode, setFullScreenTutorMode] = useState(false);
+  const [chatOutputMode, setChatOutputMode] = useState<"markdown" | "latex">("markdown");
   const [transcriptText, setTranscriptText] = useState("");
   const [notesNotebook, setNotesNotebook] = useState<any | null>(null);
   const [notesLoading, setNotesLoading] = useState(false);
@@ -157,6 +159,42 @@ export default function Dashboard() {
 
   const chatContainerRef = useRef<HTMLDivElement | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+
+  const renderMarkdownAnswer = (text: string) => (
+    <div className="prose prose-invert max-w-none whitespace-pre-wrap">
+      <ReactMarkdown
+        remarkPlugins={[remarkMath, remarkGfm]}
+        rehypePlugins={[rehypeKatex]}
+        components={{
+          a: ({ href, children }) => (
+            <a
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-300 hover:text-blue-100"
+            >
+              {children}
+            </a>
+          ),
+        }}
+      >
+        {normalizeMathMarkdown(text, videoId)}
+      </ReactMarkdown>
+    </div>
+  );
+
+  const renderLatexAnswer = (latex: string) => {
+    let html = "";
+    try {
+      html = katex.renderToString(latex, {
+        throwOnError: false,
+        displayMode: true,
+      });
+    } catch (e) {
+      html = `<pre class="text-sm text-red-300">LaTeX render error:\n${String(e)}</pre>`;
+    }
+    return <div className="prose prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: html }} />;
+  };
 
   const normalizeMathMarkdown = (text: string, videoId?: string) => {
     // Convert output into clean Markdown that separates math from descriptive text.
@@ -756,7 +794,7 @@ setAudioStatus("uploading");
       const res = await fetch(`${apiBase}/api/chat/ask/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ video_id: videoId, question }),
+        body: JSON.stringify({ video_id: videoId, question, format: chatOutputMode }),
       });
 
       if (!res.ok) {
@@ -772,7 +810,7 @@ setAudioStatus("uploading");
         setChatAnswer(answer);
         setChatHistory((prev) => {
           const next = prev.slice(0, chatIndex + 1);
-          next.push({ question, answer });
+          next.push({ question, answer, format: chatOutputMode });
           return next;
         });
         setChatIndex((prev) => prev + 1);
@@ -796,7 +834,7 @@ setAudioStatus("uploading");
       // add to history once streaming completes
       setChatHistory((prev) => {
         const next = prev.slice(0, chatIndex + 1);
-        next.push({ question, answer: accumulated });
+        next.push({ question, answer: accumulated, format: chatOutputMode });
         return next;
       });
       setChatIndex((prev) => prev + 1);
@@ -1391,26 +1429,7 @@ setAudioStatus("uploading");
                         <div className="flex justify-start">
                           <div className="max-w-[80%] rounded-2xl bg-slate-900/60 border border-white/10 p-3 text-sm text-slate-200">
                             <div className="text-xs text-slate-400 mb-1">Sage</div>
-                            <div className="prose prose-invert max-w-none whitespace-pre-wrap">
-                              <ReactMarkdown
-                                remarkPlugins={[remarkMath, remarkGfm]}
-                                rehypePlugins={[rehypeKatex]}
-                                components={{
-                                  a: ({ href, children }) => (
-                                    <a
-                                      href={href}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="text-blue-300 hover:text-blue-100"
-                                    >
-                                      {children}
-                                    </a>
-                                  ),
-                                }}
-                              >
-                                {normalizeMathMarkdown(entry.answer, videoId)}
-                              </ReactMarkdown>
-                            </div>
+                            {entry.format === "latex" ? renderLatexAnswer(entry.answer) : renderMarkdownAnswer(entry.answer)}
                           </div>
                         </div>
                       </div>
@@ -1596,11 +1615,7 @@ setAudioStatus("uploading");
                         <div className="flex justify-start">
                           <div className="max-w-[80%] rounded-2xl bg-slate-900/60 border border-white/10 p-3 text-sm text-slate-200">
                             <div className="text-xs text-slate-400 mb-1">Sage</div>
-                            <div className="prose prose-invert max-w-none whitespace-pre-wrap">
-                              <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                                {normalizeMathMarkdown(entry.answer, videoId)}
-                              </ReactMarkdown>
-                            </div>
+                            {entry.format === "latex" ? renderLatexAnswer(entry.answer) : renderMarkdownAnswer(entry.answer)}
                           </div>
                         </div>
                       </div>
