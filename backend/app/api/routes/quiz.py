@@ -92,12 +92,11 @@ def generate_quiz(req: QuizRequest):
     )
 
     try:
-        response = rag_service.groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+        raw = rag_service.chat_completion(
             messages=[{"role": "user", "content": prompt}],
+            model="llama-3.3-70b-versatile",
             temperature=0.7,
-        )
-        raw = response.choices[0].message.content.strip()
+        ).strip()
 
         questions = []
         # helper to attempt JSON parsing and return None on failure
@@ -155,12 +154,11 @@ def generate_quiz(req: QuizRequest):
                 f" (difficulty: {req.config.difficulty}) based on the following context:\n{context_text}"
             )
             try:
-                alt_resp = rag_service.groq_client.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
+                alt_raw = rag_service.chat_completion(
                     messages=[{"role": "user", "content": alt_prompt}],
+                    model="llama-3.3-70b-versatile",
                     temperature=0.7,
-                )
-                alt_raw = alt_resp.choices[0].message.content.strip()
+                ).strip()
                 lines = [l.strip() for l in alt_raw.split("\n") if l.strip()]
                 for idx, line in enumerate(lines[: req.config.questionCount]):
                     clean = line.lstrip("0123456789. -")

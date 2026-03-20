@@ -294,6 +294,12 @@ export default function Dashboard() {
 
   const isReady = stage === "ready";
 
+  const canProcess =
+    stage !== "processing" &&
+    ((inputMode === "youtube" && videoUrl.trim()) ||
+      (inputMode === "pdf" && pdfFile) ||
+      (inputMode === "audio" && audioFile));
+
   const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
   const fetchMasterclassNotes = async () => {
@@ -744,25 +750,53 @@ setAudioStatus("uploading");
   const askQuestion = async (question: string) => {
     if (!videoId || !question.trim()) return;
     setChatLoading(true);
+    setChatAnswer("");
 
     try {
-      const res = await fetch(`${apiBase}/api/chat/ask`, {
+      const res = await fetch(`${apiBase}/api/chat/ask/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ video_id: videoId, question }),
       });
-      const data = await res.json();
+
       if (!res.ok) {
+        const data = await res.json().catch(() => null);
         throw new Error(data?.detail || data?.message || "Failed to get answer");
       }
 
-      const answer = String(data.answer ?? "(No answer returned)");
-      setChatAnswer(answer);
+      const reader = res.body?.getReader();
+      if (!reader) {
+        // Fallback to non-streaming behavior
+        const data = await res.json();
+        const answer = String(data.answer ?? "(No answer returned)");
+        setChatAnswer(answer);
+        setChatHistory((prev) => {
+          const next = prev.slice(0, chatIndex + 1);
+          next.push({ question, answer });
+          return next;
+        });
+        setChatIndex((prev) => prev + 1);
+        setChatQuestion("");
+        return;
+      }
 
-      // Add answer to history (support step-back navigation)
+      const decoder = new TextDecoder();
+      let done = false;
+      let accumulated = "";
+
+      while (!done) {
+        const { value, done: d } = await reader.read();
+        done = d;
+        if (value) {
+          accumulated += decoder.decode(value, { stream: true });
+          setChatAnswer(accumulated);
+        }
+      }
+
+      // add to history once streaming completes
       setChatHistory((prev) => {
         const next = prev.slice(0, chatIndex + 1);
-        next.push({ question, answer });
+        next.push({ question, answer: accumulated });
         return next;
       });
       setChatIndex((prev) => prev + 1);
@@ -804,7 +838,17 @@ setAudioStatus("uploading");
   const transcriptSegments = downloadState.response?.segments || [];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white">
+    <div className="relative min-h-screen overflow-hidden text-white">
+      {/* Background blobs */}
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute -top-32 -left-32 h-72 w-72 rounded-full bg-amber-500/20 blur-3xl animate-blob" />
+        <div
+          className="absolute -bottom-32 -right-32 h-72 w-72 rounded-full bg-emerald-500/20 blur-3xl animate-blob"
+          style={{ animationDelay: "3s" }}
+        />
+      </div>
+
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
       {/* Top progress bar */}
       {stage === "processing" && (
         <div className="h-1 w-full bg-amber-500/20">
@@ -815,7 +859,9 @@ setAudioStatus("uploading");
       {/* Header */}
       <header className="flex items-center justify-between gap-4 px-6 py-6">
         <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-amber-500 flex items-center justify-center text-lg font-bold text-slate-950">V</div>
+          <div className="h-10 w-10 rounded-xl bg-amber-500 flex items-center justify-center text-lg font-bold text-slate-950 shadow-lg shadow-amber-500/40 animate-spin-slow">
+            V
+          </div>
           <div>
             <h1 className="text-3xl font-semibold tracking-tight">VidSage</h1>
             <p className="text-sm text-slate-300">AI Study Buddy for Videos</p>
@@ -852,7 +898,10 @@ setAudioStatus("uploading");
                     (inputMode === "pdf" && !pdfFile) ||
                     (inputMode === "audio" && !audioFile)
                   }
-                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-emerald-500 px-5 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
+                  className={
+                    "absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-emerald-500 px-5 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50 " +
+                    (canProcess ? "animate-pulse" : "")
+                  }
                 >
                   {stage === "processing" ? "Processing..." : "Process"}
                 </button>
@@ -885,7 +934,7 @@ setAudioStatus("uploading");
                 }
                 title="Upload Audio"
               >
-                <Mic className="h-5 w-5" />
+                <Upload className="h-5 w-5" />
               </button>
 
               <input
@@ -983,7 +1032,7 @@ setAudioStatus("uploading");
           <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr_360px] gap-6 items-stretch min-h-[60vh]">
             {/* Left Sidebar (Navigation) */}
             <aside className="space-y-6 h-full">
-              <div className="flex h-full flex-col rounded-2xl border border-white/10 bg-slate-900/50 p-5">
+              <div className="flex h-full flex-col rounded-2xl border border-white/10 bg-slate-900/50 p-5 backdrop-blur-2xl shadow-xl shadow-black/30">
                 <div className="flex items-start gap-4">
                   <img
                     src={`https://img.youtube.com/vi/${videoId}/hqdefault.jpg`}
@@ -1052,7 +1101,7 @@ setAudioStatus("uploading");
             </aside>
 
             {/* Center Content */}
-            <main className="rounded-2xl border border-white/10 bg-slate-900/50 p-6">
+            <main className="rounded-2xl border border-white/10 bg-slate-900/50 p-6 backdrop-blur-2xl shadow-xl shadow-black/30">
               <div className="flex items-center justify-between">
                 <h2 className="text-xl font-semibold text-white">
                   {activeMode === "progress" 
@@ -1066,7 +1115,10 @@ setAudioStatus("uploading");
               {activeMode === "progress" && (
                 <div className="mt-4 rounded-xl border border-white/10 bg-slate-950/40 p-6 text-sm text-slate-200">
                   <div className="flex items-center justify-between">
-                    <div className="text-sm font-medium text-white">Status</div>
+                    <div className="flex items-center gap-2 text-sm font-medium text-white">
+                      <Upload className="h-4 w-4 text-emerald-300" />
+                      {inputMode === "audio" ? "Audio Upload Status" : "Status"}
+                    </div>
                     <div className="text-lg font-semibold text-white">
                       {audioProgress != null ? `${audioProgress.toFixed(0)}%` : "—"}
                     </div>
@@ -1310,7 +1362,7 @@ setAudioStatus("uploading");
 
             {/* Right Sidebar (Sage Assistant) */}
             <aside className="space-y-6 h-full">
-              <div className="flex h-full flex-col rounded-2xl border border-white/10 bg-slate-800/50 p-5">
+              <div className="flex h-full flex-col rounded-2xl border border-white/10 bg-slate-800/50 p-5 backdrop-blur-2xl shadow-xl shadow-black/30">
                 <div className="flex items-center justify-between">
                   <div>
                     <h3 className="text-sm font-semibold text-white">Sage Assistant</h3>
@@ -1329,7 +1381,7 @@ setAudioStatus("uploading");
                 <div className="mt-4 flex flex-1 flex-col overflow-hidden">
                   <div ref={chatContainerRef} className="flex-1 space-y-4 overflow-y-auto pr-2">
                     {chatHistory.slice(0, chatIndex + 1).map((entry, idx) => (
-                      <div key={idx} className="space-y-2">
+                      <div key={idx} className="space-y-2 animate-fade-in">
                         <div className="flex justify-end">
                           <div className="max-w-[80%] rounded-2xl bg-emerald-500/20 p-3 text-sm text-slate-200">
                             <div className="text-xs text-slate-300 mb-1">You</div>
@@ -1534,7 +1586,7 @@ setAudioStatus("uploading");
                 <div className="flex flex-1 flex-col overflow-hidden px-6 py-4">
                   <div className="flex-1 overflow-y-auto pr-2 space-y-4">
                     {chatHistory.slice(0, chatIndex + 1).map((entry, idx) => (
-                      <div key={idx} className="space-y-2">
+                      <div key={idx} className="space-y-2 animate-fade-in">
                         <div className="flex justify-end">
                           <div className="max-w-[80%] rounded-2xl bg-emerald-500/20 p-3 text-sm text-slate-200">
                             <div className="text-xs text-slate-300 mb-1">You</div>
@@ -1598,5 +1650,6 @@ setAudioStatus("uploading");
         </div>
       </main>
     </div>
+  </div>
   );
 }

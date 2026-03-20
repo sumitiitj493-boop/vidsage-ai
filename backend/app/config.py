@@ -27,7 +27,13 @@ class Settings:
     # Cleaning settings
     CLEANING_MODEL: str = os.getenv("CLEANING_MODEL", "llama-3.1-8b-instant")
     MAX_CHUNK_SIZE: int = 2500  # characters per LLM chunk (reduced slightly for rate limits)
-    
+
+    # Fallback LLM (OpenRouter / OpenAI-compatible)
+    OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
+    OPENROUTER_URL: str = os.getenv("OPENROUTER_URL", "https://openrouter.ai/api/v1")
+    OPENROUTER_MODEL: str = os.getenv("OPENROUTER_MODEL", "gpt-4o-mini")
+    OPENROUTER_TIMEOUT: int = int(os.getenv("OPENROUTER_TIMEOUT", "120"))
+
     # RAG Settings
     # Use absolute path for ChromaDB to avoid CWD issues
     CHROMA_DB_DIR: str = str(Path(__file__).parent.parent / "chroma_db") 

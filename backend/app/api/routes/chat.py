@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from app.services.rag_service import rag_service
 
@@ -15,6 +16,17 @@ def ask_video(request: ChatRequest):
     """
     answer = rag_service.answer_question(request.video_id, request.question)
     return {"answer": answer}
+
+
+@router.post("/ask/stream")
+def ask_video_stream(request: ChatRequest):
+    """Stream the answer text as it is generated."""
+
+    def stream_generator():
+        for chunk in rag_service.answer_question_stream(request.video_id, request.question):
+            yield chunk
+
+    return StreamingResponse(stream_generator(), media_type="text/plain")
 
 @router.get("/suggest/{video_id}")
 def get_suggested_questions(video_id: str):

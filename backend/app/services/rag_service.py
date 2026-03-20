@@ -1,11 +1,19 @@
-import os
+import json
+import logging
+from typing import Any, Dict, Generator, List, Optional
+
 import chromadb
+import requests
 from sentence_transformers import SentenceTransformer
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from groq import Groq
+
 from app.config import settings
+<<<<<<< HEAD
 import logging
 from typing import Optional
+=======
+>>>>>>> f4f49a7 (UI sparkle + OpenRouter fallback + upload audio UX polish)
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +39,226 @@ class RAGService:
         self.chroma_client = chromadb.PersistentClient(path=settings.CHROMA_DB_DIR)
         
         # 3. Initialize "Logic" (LLM)
-        self.groq_client = Groq(api_key=settings.GROQ_API_KEY)
-        
+        # Groq needs an API key; if absent we will fallback to OpenRouter.
+        self.groq_client = Groq(api_key=settings.GROQ_API_KEY) if settings.GROQ_API_KEY else None
+        self.groq_enabled = bool(settings.GROQ_API_KEY)
+
+        # OpenRouter / OpenAI-compatible fallback
+        self.openrouter_key = settings.OPENROUTER_API_KEY
+        self.openrouter_url = settings.OPENROUTER_URL.rstrip("/")
+        self.openrouter_model = settings.OPENROUTER_MODEL
+        self.openrouter_timeout = settings.OPENROUTER_TIMEOUT
+        self.openrouter_enabled = bool(self.openrouter_key)
+
+    def _messages_to_prompt(self, messages: List[Dict[str, Any]]) -> str:
+        """Convert a chat-style messages list into a single string prompt."""
+        prompt_lines: List[str] = []
+        for m in messages:
+            role = str(m.get("role", "user")).strip().capitalize()
+            content = str(m.get("content", ""))
+            prompt_lines.append(f"{role}: {content}")
+        return "\n".join(prompt_lines)
+
+    def _is_rate_limit_error(self, error: Exception) -> bool:
+        msg = str(error).lower()
+        if "429" in msg or "rate limit" in msg or "quota" in msg or "rate_limit" in msg:
+            return True
+        status = getattr(error, "status_code", None) or getattr(error, "code", None)
+        try:
+            if status and int(status) == 429:
+                return True
+        except Exception:
+            pass
+        return False
+
+    def _openrouter_generate(
+        self,
+        prompt: str,
+        model: Optional[str] = None,
+        temperature: float = 0.7,
+        max_tokens: Optional[int] = None,
+    ) -> str:
+        """Generate text via an OpenAI-compatible OpenRouter endpoint."""
+        if not self.openrouter_enabled:
+            raise RuntimeError(
+                "OpenRouter fallback is disabled. Set OPENROUTER_API_KEY in your env to enable."
+            )
+
+        # OpenRouter may reject requests that are too large. Cap prompt size to avoid 400 errors.
+        max_prompt_chars = 15000
+        if len(prompt) > max_prompt_chars:
+            logger.warning(
+                "Truncating OpenRouter prompt from %d to %d chars to avoid request errors.",
+                len(prompt),
+                max_prompt_chars,
+            )
+            prompt = prompt[:max_prompt_chars]
+
+        payload: Dict[str, Any] = {
+            "model": model or self.openrouter_model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": temperature,
+        }
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+
+        headers = {
+            "Authorization": f"Bearer {self.openrouter_key}",
+            "Content-Type": "application/json",
+        }
+
+        resp = requests.post(
+            f"{self.openrouter_url}/chat/completions",
+            json=payload,
+            headers=headers,
+            timeout=self.openrouter_timeout,
+        )
+        try:
+            resp.raise_for_status()
+        except requests.HTTPError as e:
+            logger.error(
+                "OpenRouter request failed (status=%s): %s",
+                resp.status_code,
+                resp.text,
+            )
+            raise RuntimeError(
+                f"OpenRouter request failed (status={resp.status_code}): {resp.text}"
+            ) from e
+
+        data = resp.json()
+        choices = data.get("choices") or []
+        if not choices:
+            return ""
+        return choices[0].get("message", {}).get("content", "") or ""
+
+    def _openrouter_generate_stream(
+        self,
+        prompt: str,
+        model: Optional[str] = None,
+        temperature: float = 0.7,
+        max_tokens: Optional[int] = None,
+    ) -> Generator[str, None, None]:
+        """Stream output from an OpenAI-compatible OpenRouter endpoint."""
+        if not self.openrouter_enabled:
+            raise RuntimeError(
+                "OpenRouter fallback is disabled. Set OPENROUTER_API_KEY in your env to enable."
+            )
+
+        # OpenRouter may reject requests that are too large. Cap prompt size to avoid request errors.
+        max_prompt_chars = 15000
+        if len(prompt) > max_prompt_chars:
+            logger.warning(
+                "Truncating OpenRouter prompt from %d to %d chars to avoid request errors.",
+                len(prompt),
+                max_prompt_chars,
+            )
+            prompt = prompt[:max_prompt_chars]
+
+        payload: Dict[str, Any] = {
+            "model": model or self.openrouter_model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": temperature,
+            "stream": True,
+        }
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+
+        headers = {
+            "Authorization": f"Bearer {self.openrouter_key}",
+            "Content-Type": "application/json",
+        }
+
+        resp = requests.post(
+            f"{self.openrouter_url}/chat/completions",
+            json=payload,
+            headers=headers,
+            timeout=self.openrouter_timeout,
+            stream=True,
+        )
+        try:
+            resp.raise_for_status()
+        except requests.HTTPError as e:
+            logger.error(
+                "OpenRouter stream request failed (status=%s): %s",
+                resp.status_code,
+                resp.text,
+            )
+            raise RuntimeError(
+                f"OpenRouter request failed (status={resp.status_code}): {resp.text}"
+            ) from e
+
+        for raw_line in resp.iter_lines(decode_unicode=True):
+            if not raw_line:
+                continue
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line.startswith("data:"):
+                payload_text = line[len("data:"):].strip()
+                if payload_text == "[DONE]":
+                    break
+                try:
+                    item = json.loads(payload_text)
+                except Exception:
+                    continue
+                for choice in item.get("choices", []):
+                    delta = choice.get("delta", {})
+                    if not delta:
+                        continue
+                    chunk = delta.get("content") or delta.get("text")
+                    if chunk:
+                        yield chunk
+
+    def _chat_completion_stream(
+        self,
+        messages: List[Dict[str, Any]],
+        model: str = "llama-3.3-70b-versatile",
+        temperature: float = 0.1,
+        max_tokens: Optional[int] = None,
+        force_local: bool = False,
+    ) -> Generator[str, None, None]:
+        """Stream text using Groq (single chunk) or OpenRouter (live)."""
+        prompt = self._messages_to_prompt(messages)
+
+        # Try Groq first
+        if self.groq_enabled and self.groq_client:
+            try:
+                response = self.groq_client.chat.completions.create(
+                    model=model, messages=messages, temperature=temperature
+                )
+                yield response.choices[0].message.content
+                return
+            except Exception as e:
+                if self._is_rate_limit_error(e):
+                    logger.warning("Groq rate limit hit; falling back to OpenRouter. (%s)", e)
+                else:
+                    logger.exception("Groq call failed; falling back to OpenRouter if available.")
+
+        # Final attempt: fallback to OpenRouter streaming.
+        # OpenRouter uses a different model namespace than Groq (e.g. gpt-4o-mini).
+        yield from self._openrouter_generate_stream(
+            prompt, model=self.openrouter_model, temperature=temperature, max_tokens=max_tokens
+        )
+
+    def chat_completion(
+        self,
+        messages: List[Dict[str, Any]],
+        model: str = "llama-3.3-70b-versatile",
+        temperature: float = 0.1,
+        max_tokens: Optional[int] = None,
+        force_local: bool = False,
+    ) -> str:
+        """Generate text using Groq, with optional local Ollama fallback."""
+        return "".join(
+            self._chat_completion_stream(
+                messages=messages,
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                force_local=force_local,
+            )
+        )
+
     def index_video(self, video_id: str, segments: list[dict]):
         """
         TEACH MODE: Chunks the transcript SEGMENTS and saves it to Vector DB with timestamps.
@@ -205,18 +431,110 @@ class RAGService:
             AI TUTOR ANSWER:
             """
             
-            # 3. Generation (Call Groq)
-            response = self.groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+            # 3. Generation (Call LLM — Groq with optional Ollama fallback)
+            return self.chat_completion(
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.1 # Strict mode
+                model="llama-3.3-70b-versatile",
+                temperature=0.1,  # Strict mode
             )
-            
-            return response.choices[0].message.content
             
         except Exception as e:
             logger.error(f"Error answering question for video {video_id}: {str(e)}")
             return f"Error occurred while generating answer: {str(e)}"
+
+    def answer_question_stream(self, video_id: str, question: str) -> Generator[str, None, None]:
+        """Stream the answer text as it is generated."""
+        try:
+            collection_name = f"video_{video_id}"
+
+            try:
+                collection = self.chroma_client.get_collection(collection_name)
+            except:
+                yield "Analysis not found for this video. Please process it first."
+                return
+
+            # 1. Retrieval (Find relevant chunks)
+            query_embedding = self.embedding_model.encode(question).tolist()
+            results = collection.query(
+                query_embeddings=[query_embedding],
+                n_results=5,
+            )
+
+            docs = results["documents"][0]
+            metas = results["metadatas"][0] if results.get("metadatas") else []
+
+            if not docs:
+                yield "No relevant context found in this video."
+                return
+
+            # Format context WITH TIMESTAMPS
+            context_pieces = []
+            has_valid_timestamps = False
+            for i, doc in enumerate(docs):
+                meta = metas[i] if i < len(metas) else {}
+                start = meta.get("start", 0)
+                end = meta.get("end", 0)
+
+                if start > 0 or end > 0:
+                    has_valid_timestamps = True
+                    start_str = self._format_timestamp(start)
+                    end_str = self._format_timestamp(end)
+                    context_pieces.append(f"[Time: {start_str}-{end_str}]\n{doc}")
+                else:
+                    context_pieces.append(f"{doc}")
+
+            context = "\n\n".join(context_pieces)
+
+            citation_rule = """
+            5. CITATIONS (CRITICAL):
+               - You MUST cite the timestamp for key facts IF they are available in context.
+               - Format: (MM:SS-MM:SS)
+               - Example: \"The CPU fetches instructions (02:30-02:45)...\"
+            """ if has_valid_timestamps else ""
+
+            prompt = f"""
+            You are an expert AI Tutor. Your goal is to explain concepts clearly using the provided context segments.
+
+            CRITICAL INSTRUCTION - LANGUAGE & STYLE:
+            - **DETECT** the language of the STUDENT QUESTION (English, Hindi, or Hinglish/Romanized Hindi).
+            - **ANSWER** in the SAME language and style.
+              - If the user asks in Hindi, answer in Hindi.
+              - If the user asks in \"Hinglish\" (WhatsApp style), answer in Hinglish.
+              - If the user asks in English, answer in English.
+            
+            CRITICAL INSTRUCTION - HANDLING ERRORS:
+            1. **Transcript Errors**: The transcript is imperfect (e.g., \"one new man\" -> \"Von Neumann\"). mentally correct these errors.
+            2. **User Question Accuracy**: 
+               - If the user asks a question with a minor typo, answer it.
+               - If the user asks about a DIFFERENT person or concept, start \"This topic is not covered in the context.\" (Or the equivalent in the user's language).
+
+            STRICT RULES:
+            1. Answer based on the **available CONTEXT** chunks below.
+            2. If the answer is not in the context, do NOT hallucinate. State that the topic is not found.
+            3. VISUALIZATION:
+               - Provide an ASCII diagram ONLY for complex data structures.
+            4. EXPLANATION:
+               - Explain algorithms step-by-step.
+               - Be detailed and comprehensive.
+            {citation_rule}
+
+            CONTEXT:
+            {context}
+
+            STUDENT QUESTION: {question}
+
+            AI TUTOR ANSWER:
+            """
+
+            yield from self._chat_completion_stream(
+                messages=[{"role": "user", "content": prompt}],
+                model="llama-3.3-70b-versatile",
+                temperature=0.1,
+            )
+
+        except Exception as e:
+            logger.error(f"Error answering question for video {video_id}: {str(e)}")
+            yield f"Error occurred while generating answer: {str(e)}"
 
     def generate_suggested_questions(self, video_id: str) -> list[str]:
         """
@@ -282,13 +600,11 @@ class RAGService:
             - No numbering or bullets.
             """
             
-            response = self.groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+            raw_questions = self.chat_completion(
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.7 
-            )
-            
-            raw_questions = response.choices[0].message.content.strip().split('\n')
+                model="llama-3.3-70b-versatile",
+                temperature=0.7,
+            ).strip().split('\n')
             # Clean up (remove "1. ", "-", empty lines)
             questions = [q.strip().lstrip("1234567890.- ") for q in raw_questions if q.strip()]
             
@@ -343,6 +659,7 @@ class RAGService:
         ]
         """
 
+<<<<<<< HEAD
         try:
             outline_resp = self.groq_client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
@@ -363,6 +680,13 @@ class RAGService:
                     retry_after_seconds=None,
                 )
             raise
+=======
+        outline_text = self.chat_completion(
+            messages=[{"role": "user", "content": outline_prompt}],
+            model="llama-3.3-70b-versatile",
+            temperature=0.2,
+        )
+>>>>>>> f4f49a7 (UI sparkle + OpenRouter fallback + upload audio UX polish)
 
         try:
             import json
@@ -419,6 +743,7 @@ class RAGService:
             Transcript:
             {chunk_text}
             """
+<<<<<<< HEAD
             try:
                 resp = self.groq_client.chat.completions.create(
                     model="llama-3.3-70b-versatile",
@@ -444,6 +769,14 @@ class RAGService:
 
             note = re.sub(r"<[^>]+>", "", note)
             note = note.replace("\r\n", "\n").strip()
+=======
+            note = self.chat_completion(
+                messages=[{"role": "user", "content": prompt}],
+                model="llama-3.3-70b-versatile",
+                temperature=0.2,
+            ).strip()
+            note_html = note.replace("\n", "<br/>")
+>>>>>>> f4f49a7 (UI sparkle + OpenRouter fallback + upload audio UX polish)
 
             return {
                 "cell_type": "markdown",
