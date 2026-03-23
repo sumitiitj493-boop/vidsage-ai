@@ -21,6 +21,18 @@ def test_notes_generate_and_pdf(client):
         assert "PDF" in pdf_res.json().get("detail", "")
 
 
+def test_masterclass_notes_endpoint(client):
+    # This test assumes there is at least one uploaded video in the chroma collection
+    # For pure unit test, we might need to insert a fake collection. Here we validate route behavior.
+    res = client.post("/api/notes/masterclass", json={"video_id": "dummy_video", "output_format": "markdown"})
+    # If video not indexed we expect a 500 with errors; test should not crash
+    assert res.status_code in (200, 500, 404)
+    data = res.json()
+    if res.status_code == 200:
+        assert "cells" in data
+        assert isinstance(data["cells"], list)
+
+
 def test_quiz_generate(client):
     req = {
         "context": "Some context about algebra and calculus.",

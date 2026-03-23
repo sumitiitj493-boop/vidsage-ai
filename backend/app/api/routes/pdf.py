@@ -1,10 +1,16 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Response
 from app.services.pdf_service import PDFService
 from app.services.rag_service import rag_service
 import uuid
 import logging
 
+from pydantic import BaseModel
+
 router = APIRouter(prefix="/api/pdf", tags=["PDF Operations"])
+class LatexRequest(BaseModel):
+    latex: str
+    title: str = "notes"
+
 logger = logging.getLogger(__name__)
 
 @router.post("/upload")
@@ -47,3 +53,20 @@ async def upload_pdf(file: UploadFile = File(...)):
     except Exception as e:
         logger.error(f"PDF Upload failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# New endpoint: Compile LaTeX to PDF
+@router.post("/latex-to-pdf")
+async def latex_to_pdf(request: LatexRequest):
+    """
+    Accepts LaTeX content, compiles it to PDF, and returns the PDF file.
+    """
+    try:
+        pdf_bytes = PDFService.latex_to_pdf(request.latex)
+        return Response(content=pdf_bytes, media_type="application/pdf",
+                        headers={
+                            "Content-Disposition": f"attachment; filename={request.title or 'notes'}.pdf"
+                        })
+    except Exception as e:
+        logger.error(f"LaTeX to PDF failed: {e}")
+        raise HTTPException(status_code=500, detail=f"LaTeX to PDF error: {str(e)}")

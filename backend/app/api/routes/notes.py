@@ -6,13 +6,16 @@ router = APIRouter(prefix="/api/notes", tags=["Notes"])
 
 class NotesRequest(BaseModel):
     video_id: str
+    output_format: str = "markdown"  # markdown | latex
 
 
 @router.post("/masterclass")
 def generate_masterclass_notes(request: NotesRequest):
     """Generate a Jupyter Notebook (.ipynb) JSON representing "masterclass" notes for the given video."""
     try:
-        notebook_json = rag_service.generate_masterclass_notebook(request.video_id)
+        notebook_json = rag_service.generate_masterclass_notebook(
+            request.video_id, output_format=request.output_format
+        )
         return notebook_json
     except RateLimitError as rte:
         raise HTTPException(

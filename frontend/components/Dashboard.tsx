@@ -154,6 +154,7 @@ export default function Dashboard() {
   const [chatOutputMode, setChatOutputMode] = useState<"markdown" | "latex">("markdown");
   const [transcriptText, setTranscriptText] = useState("");
   const [notesNotebook, setNotesNotebook] = useState<any | null>(null);
+  const [notesFormat, setNotesFormat] = useState<"markdown" | "latex">("markdown");
   const [notesLoading, setNotesLoading] = useState(false);
   const [notesError, setNotesError] = useState<string | null>(null);
 
@@ -349,7 +350,7 @@ export default function Dashboard() {
       const res = await fetch(`${apiBase}/api/notes/masterclass`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ video_id: videoId }),
+        body: JSON.stringify({ video_id: videoId, output_format: notesFormat }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.detail || data?.message || "Failed to generate notes");
@@ -374,13 +375,107 @@ export default function Dashboard() {
     URL.revokeObjectURL(url);
   };
 
+  const markdownToHtml = (markdown: string) => {
+    const escapeHtml = (text: string) =>
+      text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+
+    const renderMathInline = (text: string) => {
+      try {
+        return katex.renderToString(text, { displayMode: false, throwOnError: false });
+      } catch {
+        return escapeHtml(`$${text}$`);
+      }
+    };
+
+    const renderMathBlock = (text: string) => {
+      try {
+        return katex.renderToString(text, { displayMode: true, throwOnError: false });
+      } catch {
+        return escapeHtml(`$$${text}$$`);
+      }
+    };
+
+    const renderString = (raw: string) => {
+      const pattern = /\$\$([\s\S]+?)\$\$|\$([^$\n]+?)\$/g;
+      let result = "";
+      let lastIndex = 0;
+      let match: RegExpExecArray | null;
+
+      while ((match = pattern.exec(raw))) {
+        result += escapeHtml(raw.substring(lastIndex, match.index));
+        if (match[1]) {
+          result += renderMathBlock(match[1]);
+        } else if (match[2]) {
+          result += renderMathInline(match[2]);
+        }
+        lastIndex = match.index + match[0].length;
+      }
+
+      result += escapeHtml(raw.substring(lastIndex));
+      return result
+        .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+        .replace(/\*(.*?)\*/g, "<em>$1</em>");
+    };
+
+    const lines = markdown.split("\n");
+    let html = "";
+    let inList = false;
+
+    const closeList = () => {
+      if (inList) {
+        html += "</ul>";
+        inList = false;
+      }
+    };
+
+    lines.forEach((rawLine) => {
+      const line = rawLine.trim();
+      if (!line) {
+        closeList();
+        html += "<br/>";
+        return;
+      }
+
+      const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
+      if (headingMatch) {
+        closeList();
+        const level = Math.min(6, headingMatch[1].length);
+        html += `<h${level}>${renderString(headingMatch[2])}</h${level}>`;
+        return;
+      }
+
+      const listMatch = line.match(/^[-*+]\s+(.+)$/);
+      if (listMatch) {
+        if (!inList) {
+          inList = true;
+          html += "<ul>";
+        }
+        let itemText = listMatch[1].trim();
+        itemText = itemText.replace(/^[-*+]\s+/, "");
+        html += `<li>${renderString(itemText)}</li>`;
+        return;
+      }
+
+      closeList();
+      html += `<p>${renderString(line)}</p>`;
+    });
+
+    closeList();
+    return html;
+  };
+
   const getNotesHtml = () => {
     if (!notesNotebook) return "";
     const cellsHtml = notesNotebook.cells
       ?.map((cell: any) => {
         if (!cell || cell.cell_type !== "markdown") return "";
         const src = Array.isArray(cell.source) ? cell.source.join("") : String(cell.source);
-        return src;
+        return markdownToHtml(src);
       })
       .join("\n");
 
@@ -502,6 +597,119 @@ export default function Dashboard() {
 </html>`;
   };
 
+  // Utility: Remove emojis from a string (Unicode emoji range)
+  function stripEmojis(str: string) {
+    // This regex matches most emoji code points
+    return str.replace(/[\u{1F300}-\u{1F6FF}\u{1F900}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F1E6}-\u{1F1FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F800}-\u{1F8FF}\u{1FA70}-\u{1FAFF}\u{1F680}-\u{1F6FF}\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F900}-\u{1F9FF}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F800}-\u{1F8FF}\u{1F900}-\u{1F9FF}\u{1FA70}-\u{1FAFF}\u{1F1E6}-\u{1F1FF}\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, "");
+  }
+
+  const getNotesLatex = () => {
+    if (!notesNotebook) return "";
+
+    const content = notesNotebook.cells
+      ?.map((cell: any) => {
+        if (!cell || cell.cell_type !== "markdown") return "";
+        let text = Array.isArray(cell.source) ? cell.source.join("") : String(cell.source);
+
+        // Remove emojis from all text for LaTeX safety
+        text = stripEmojis(text);
+
+        // convert markdown headings to LaTeX sections
+        text = text.replace(/^######\s*(.+)$/gm, "\\subsubsubsection{$1}");
+        text = text.replace(/^#####\s*(.+)$/gm, "\\subsubsection{$1}");
+        text = text.replace(/^####\s*(.+)$/gm, "\\subsection{$1}");
+        text = text.replace(/^###\s*(.+)$/gm, "\\section{$1}");
+        text = text.replace(/^##\s*(.+)$/gm, "\\subsection{$1}");
+        text = text.replace(/^#\s*(.+)$/gm, "\\section{$1}");
+
+        // convert bullets to itemize
+        const lines = text.split("\n");
+        let inItemize = false;
+        const out = [];
+        for (let rawLine of lines) {
+          const trimmed = rawLine.trim();
+          if (!trimmed) {
+            if (inItemize) {
+              out.push("\\end{itemize}");
+              inItemize = false;
+            }
+            out.push("");
+            continue;
+          }
+
+          const itemMatch = trimmed.match(/^[-*+]\s+(.+)$/);
+          if (itemMatch) {
+            if (!inItemize) {
+              out.push("\\begin{itemize}");
+              inItemize = true;
+            }
+            let itemText = itemMatch[1].trim();
+            itemText = itemText.replace(/^\*\s*-\s*/, "").replace(/^[-]\s*\*\s*/, "").replace(/^\*\s*\*\s*/, "");
+            out.push(`\\item ${itemText}`);
+            continue;
+          }
+
+          if (inItemize) {
+            out.push("\\end{itemize}");
+            inItemize = false;
+          }
+          out.push(trimmed);
+        }
+        if (inItemize) out.push("\\end{itemize}");
+
+        return out.join("\n");
+      })
+      .join("\n\n");
+
+    // Remove emojis from title as well
+    const safeTitle = stripEmojis(videoTitle || "Notes");
+
+    return `\\documentclass{article}\\usepackage{amsmath,amssymb}\\begin{document}\\title{${safeTitle}}\\maketitle\n\n${content}\n\\end{document}`;
+  };
+
+  const downloadNotesLatex = () => {
+    const latex = getNotesLatex();
+    if (!latex) return;
+    const blob = new Blob([latex], { type: "application/x-latex" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${videoTitle || videoId || "notes"}.tex`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const openInOverleaf = () => {
+    const latex = getNotesLatex();
+    if (!latex) return;
+
+    // Overleaf supports snip_uri with data URI
+    // Convert to UTF-8 Base64 safely
+    const uint8 = new TextEncoder().encode(latex);
+    let binary = "";
+    for (let i = 0; i < uint8.length; i += 1) {
+      binary += String.fromCharCode(uint8[i]);
+    }
+    const base64 = btoa(binary);
+
+    const form = document.createElement("form");
+    form.action = "https://www.overleaf.com/docs";
+    form.method = "POST";
+    form.target = "_blank";
+
+    const input = document.createElement("input");
+    input.type = "hidden";
+    input.name = "snip_uri";
+    input.value = `data:application/x-tex;base64,${base64}`;
+    form.appendChild(input);
+
+    document.body.appendChild(form);
+    form.submit();
+    form.remove();
+  };
+
   const downloadNotesHtml = () => {
     const html = getNotesHtml();
     if (!html) return;
@@ -517,61 +725,33 @@ export default function Dashboard() {
     URL.revokeObjectURL(url);
   };
 
-  const downloadNotesPdfDirect = async () => {
-    if (!notesNotebook) return;
-
-    const html = getNotesHtml();
-    if (!html) return;
-
-    if (typeof window === "undefined") return;
-
-    const html2pdf = (await import("html2pdf.js")).default;
-
-    const container = document.createElement("div");
-    container.style.position = "fixed";
-    container.style.top = "-9999px";
-    container.style.width = "1024px";
-    container.innerHTML = html;
-    document.body.appendChild(container);
+  // Download PDF using backend LaTeX-to-PDF API
+  const downloadNotesPdfBackend = async () => {
+    const latex = getNotesLatex();
+    if (!latex) return;
 
     try {
-      await html2pdf()
-        .from(container)
-        .set({
-          margin: 10,
-          filename: `${videoTitle || videoId || "notes"}.pdf`,
-          image: { type: "jpeg", quality: 0.98 },
-          html2canvas: { scale: 2, useCORS: true },
-          jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
-        })
-        .toPdf()
-        .get("pdf")
-        .then((pdf: any) => {
-          const totalPages = pdf.internal.getNumberOfPages();
-          const now = new Date();
-          const headerText = `${videoTitle || "Notes"} • Generated ${now.toLocaleDateString()} ${now.toLocaleTimeString()}`;
-
-          pdf.setFontSize(9);
-          pdf.setTextColor(100);
-
-          for (let page = 1; page <= totalPages; page += 1) {
-            pdf.setPage(page);
-
-            // Header
-            pdf.text(headerText, 15, 12);
-
-            // Footer (page numbering)
-            const pageText = `Page ${page} / ${totalPages}`;
-            const { width } = pdf.internal.pageSize;
-            pdf.text(pageText, width - 15, pdf.internal.pageSize.getHeight() - 12, {
-              align: "right",
-            });
-          }
-
-          pdf.save(`${videoTitle || videoId || "notes"}.pdf`);
-        });
-    } finally {
-      container.remove();
+      const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+      const response = await fetch(`${apiBase}/api/pdf/latex-to-pdf`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ latex, title: videoTitle || videoId || "notes" }),
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.detail || "Failed to generate PDF");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `${videoTitle || videoId || "notes"}.pdf`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert("PDF generation failed: " + (e?.message || e));
     }
   };
 
@@ -1038,7 +1218,7 @@ setAudioStatus("uploading");
             <div className="flex flex-col items-center gap-4 rounded-3xl border border-white/10 bg-slate-900/50 px-10 py-12">
               <Loader2 className="h-12 w-12 animate-spin text-amber-400" />
               <h2 className="text-2xl font-semibold text-white">Extracting wisdom from your video...</h2>
-              <p className="text-sm text-slate-300">This can take a moment. We'll notify you when the transcript is ready.</p>
+              <p className="text-sm text-slate-300">This can take a moment. We&apos;ll notify you when the transcript is ready.</p>
 
               {inputMode === "audio" && (
                 <div className="mt-6 w-full max-w-lg rounded-xl border border-white/10 bg-slate-950/40 p-4 text-left text-sm">
@@ -1321,6 +1501,17 @@ setAudioStatus("uploading");
 
                   <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/40 p-6 text-sm text-slate-200">
                     <div className="flex flex-wrap gap-2 mb-4">
+                      <label className="inline-flex items-center gap-2 text-xs text-slate-200">
+                        <span>Format:</span>
+                        <select
+                          value={notesFormat}
+                          onChange={(e) => setNotesFormat(e.target.value as "markdown" | "latex")}
+                          className="rounded border border-slate-600 bg-slate-900 px-2 py-1 text-xs"
+                        >
+                          <option value="markdown">Markdown</option>
+                          <option value="latex">LaTeX</option>
+                        </select>
+                      </label>
                       <button
                         type="button"
                         onClick={fetchMasterclassNotes}
@@ -1351,10 +1542,35 @@ setAudioStatus("uploading");
                           </button>
                           <button
                             type="button"
-                            onClick={downloadNotesPdfDirect}
+                            onClick={downloadNotesPdfBackend}
                             className="rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-slate-200 hover:bg-white/15"
                           >
                             Download PDF
+                          </button>
+                          <button
+                            type="button"
+                            onClick={openInOverleaf}
+                            className="rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-slate-200 hover:bg-white/15"
+                          >
+                            Open in Overleaf
+                          </button>
+                          <button
+                            type="button"
+                            onClick={downloadNotesLatex}
+                            className="rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-slate-200 hover:bg-white/15"
+                          >
+                            Download LaTeX
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const latex = getNotesLatex();
+                              if (!latex) return;
+                              navigator.clipboard.writeText(latex);
+                            }}
+                            className="rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-slate-200 hover:bg-white/15"
+                          >
+                            Copy LaTeX
                           </button>
                           <button
                             type="button"
@@ -1375,13 +1591,18 @@ setAudioStatus("uploading");
                       <div className="prose prose-invert max-w-none leading-relaxed">
                         {notesNotebook.cells?.map((cell: any, idx: number) => {
                           const cellText = Array.isArray(cell.source) ? cell.source.join("") : String(cell.source);
+                          const sanitizedCellText = cellText
+                            .split("\n")
+                            .filter((line: string) => !/^\s*-?\s*Timestamp\s*[:=]/i.test(line))
+                            .filter((line: string) => !/^\s*Segment\s*\(.*\)/i.test(line))
+                            .join("\n");
                           return (
                             <div key={idx} className="notebook-cell">
                               <ReactMarkdown
                                 remarkPlugins={[remarkMath, remarkGfm]}
                                 rehypePlugins={[rehypeKatex]}
                               >
-                                {normalizeMathMarkdown(cellText, videoId)}
+                                {normalizeMathMarkdown(sanitizedCellText, videoId)}
                               </ReactMarkdown>
                             </div>
                           );

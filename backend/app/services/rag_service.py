@@ -45,6 +45,20 @@ class RAGService:
         self.openrouter_timeout = settings.OPENROUTER_TIMEOUT
         self.openrouter_enabled = bool(self.openrouter_key)
 
+    def _build_strict_latex_prompt(self, base_prompt: str) -> str:
+        return f"""
+{base_prompt}
+
+IMPORTANT INSTRUCTIONS (Use for notebook-quality math notes):
+- Output must be valid LaTeX and Markdown only.
+- Use `\\text{...}` for prose inside LaTeX math segments if needed.
+- For formulas, use LaTeX math delimiters (`$...$` inline, `$$...$$` block).
+- Provide section headings, bullet points, and clean structure.
+- Do NOT include raw segment tags like "Segment (0:00)" repeated.
+- Do not output Hindi or other mix-language in this mode; use English only.
+- If you cannot answer, output `\\text{{Unable to generate notes.}}`.
+"""
+
     def _messages_to_prompt(self, messages: List[Dict[str, Any]]) -> str:
         """Convert a chat-style messages list into a single string prompt."""
         prompt_lines: List[str] = []
@@ -427,7 +441,7 @@ class RAGService:
             """
             
             if output_format.lower() == "latex":
-                prompt += "\n\nIMPORTANT: Provide the answer in valid LaTeX only. Use `\\text{...}` for prose and standard LaTeX math for formulas. Do not include markdown or HTML."
+                prompt = self._build_strict_latex_prompt(prompt)
 
             answer = self.chat_completion(
                 messages=[{"role": "user", "content": prompt}],
@@ -621,11 +635,13 @@ class RAGService:
             logger.error(f"Error generating suggestions for {video_id}: {e}")
             return ["Summarize this video", "What are the main topics?", "Who is the speaker?"]
 
-    def generate_masterclass_notebook(self, video_id: str) -> dict:
+    def generate_masterclass_notebook(self, video_id: str, output_format: str = "markdown") -> dict:
         """Generate a Jupyter Notebook (.ipynb) JSON for the given video.
 
         This creates an outline template, then fills it in using chunked note generation
         to stay within token and rate limits.
+
+        output_format: "markdown" or "latex"
         """
         collection_name = f"video_{video_id}"
 
@@ -650,6 +666,8 @@ class RAGService:
         outline_prompt = f"""
         You are an expert educational content creator.
         Create a concise outline (section titles + bullet points) for masterclass notes.
+        Language: English only.
+        Do not include Hindi, Romanized Hindi, or mixed-language text.
         Use the transcript below to infer main topics and subtopics.
 
         Transcript:
@@ -696,30 +714,78 @@ class RAGService:
         except Exception:
             outline = [{"section": "Notes", "bullets": []}]
 
+        # Sanitize outline: avoid generic noisy root labels
+        if len(outline) == 1 and outline[0].get("section", "").strip().lower() == "notes":
+            outline = []
+
         cells = []
         # Title header
-        cells.append({
-            "cell_type": "markdown",
-            "metadata": {},
-            "source": [
-                "# 🚀 Masterclass Notes\n\n",
-                "Generated from transcript.\n",
-            ],
-        })
+        if output_format.lower() == "latex":
+            cells.append({
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": [
+                    "\\section*{🚀 Masterclass Notes}\n",
+                    "\\textit{Generated from transcript.}\n\n",
+                ],
+            })
+        else:
+            cells.append({
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": [
+                    "# 🚀 Masterclass Notes\n\n",
+                    "Generated from transcript.\n\n",
+                ],
+            })
 
         # Outline cell
-        outline_lines = ["## In This Lecture\n"]
+        if output_format.lower() == "latex":
+            outline_lines = ["\\subsection*{In This Lecture}\n"]
+            for entry in outline:
+                section_title = entry.get("section")
+                bullets = entry.get("bullets", [])
+                outline_lines.append(f"\\textbf{{{section_title}}}\\\n")
+                for b in bullets:
+                    outline_lines.append(f"\\begin{{itemize}}\\item {b}\\end{{itemize}}\n")
+            cells.append({
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": ["".join(outline_lines) + "\n"],
+            })
+        else:
+            outline_lines = ["## In This Lecture\n"]
+            for entry in outline:
+                section_title = entry.get("section")
+                bullets = entry.get("bullets", [])
+                outline_lines.append(f"- **{section_title}**\n")
+                for b in bullets:
+                    outline_lines.append(f"  - {b}\n")
+            cells.append({
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": ["".join(outline_lines) + "\n"],
+            })
+
+        # Add section overview cells for navigational flow
         for entry in outline:
-            section_title = entry.get("section")
+            section_title = entry.get("section", "Untitled")
             bullets = entry.get("bullets", [])
-            outline_lines.append(f"- **{section_title}**")
-            for b in bullets:
-                outline_lines.append(f"  - {b}")
-        cells.append({
-            "cell_type": "markdown",
-            "metadata": {},
-            "source": ["\n".join(outline_lines) + "\n"],
-        })
+            if output_format.lower() == "latex":
+                section_source = [f"\\section{{{section_title}}}\n\n"]
+                for b in bullets:
+                    section_source.append(f"\\begin{{itemize}}\\item {b}\\end{{itemize}}\n")
+                section_source.append("\n")
+            else:
+                section_source = [f"## {section_title}\n\n"]
+                for b in bullets:
+                    section_source.append(f"- {b}\n")
+                section_source.append("\n")
+            cells.append({
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": section_source,
+            })
 
         def format_ts(start: float) -> str:
             try:
@@ -731,18 +797,37 @@ class RAGService:
                 return "0:00"
 
         def create_note_cell(chunk_text: str, ts: str) -> dict:
+            mandatory_notes = """
+You are an expert note-taking assistant.
+For each segment:
+- Start with a 1-2 sentence summary of the main idea (use **bold** or *italics* for emphasis).
+- Then, provide 4 concise, explanatory bullets, each starting with `- `.
+- At least one bullet should use a math formula (if relevant), in `$...$` (inline) or `$$...$$` (block).
+- Use active language, highlight key insights, and avoid repetition.
+- Do not include timestamp markers in the output (timestamp shown in heading only).
+"""
+
+            if output_format.lower() == "latex":
+                format_instructions = (
+                    "Use valid LaTeX: start each segment with \\section{...}, then a short summary, then an \\begin{itemize} list. "
+                    "Use $...$ or $$...$$ for math. Avoid raw markdown."
+                )
+            else:
+                format_instructions = (
+                    "Use Markdown: start with a bolded summary, then a bullet list. Use $...$ or $$...$$ for math."
+                )
+
             prompt = f"""
-            Create a concise, engaging note snippet (3-5 bullet points) for this transcript chunk.
-            Return the note in **valid Markdown only** (no HTML or styling tags).
+{mandatory_notes}
+{format_instructions}
 
-            - Start with a heading like `## Segment (0:00)`.
-            - Include the timestamp in the first bullet point.
-            - Use `*` or `-` for bullet points.
-            - Wrap any math or formulas using `$...$` (inline) or `$$...$$` (block).
+Transcript chunk:
+{chunk_text}
 
-            Transcript:
-            {chunk_text}
-            """
+REQUIRED OUTPUT:
+If LaTeX: \\section{{...}}\nSummary sentence(s)\n\\begin{{itemize}}\n\\item ...\n...\n\\end{{itemize}}
+If Markdown: **Summary sentence(s)**\n- ...\n- ...\n- ...\n- ...
+"""
             try:
                 resp = self.groq_client.chat.completions.create(
                     model="llama-3.3-70b-versatile",
@@ -775,17 +860,79 @@ class RAGService:
 
             note = re.sub(r"<[^>]+>", "", note).strip()
             note = note.replace("\r\n", "\n").strip()
-            if not note:
-                note = "*No note could be generated.*"
 
-            return {
-                "cell_type": "markdown",
-                "metadata": {},
-                "source": [
-                    f"## Segment ({ts})\n\n",
-                    note + "\n",
-                ],
-            }
+            # remove redundant metadata lines produced by some models
+            note = re.sub(r"^Segment\s*\(.*\)\\n", "", note, flags=re.MULTILINE)
+            note = re.sub(r"^\s*-?\s*Timestamp\s*[:=].*", "", note, flags=re.IGNORECASE | re.MULTILINE)
+            note = note.strip()
+
+            # Advanced: Parse LLM output into subtopic, summary, bullets, formulas
+            import re
+            subtopic = ""
+            summary = ""
+            bullets = []
+            formulas = []
+            lines = [line.strip() for line in note.split("\n") if line.strip()]
+            mode = None
+            for line in lines:
+                if re.match(r"^(#+|\\\section|\\\subsection|Subtopic:|###)", line, re.IGNORECASE):
+                    subtopic = re.sub(r"^(#+|\\\section|\\\subsection|Subtopic:|###)\s*:?\s*", "", line)
+                elif line.lower().startswith("summary") or line.lower().startswith("> **summary:**"):
+                    mode = "summary"
+                    summary = re.sub(r"^.*?summary:?\s*", "", line, flags=re.IGNORECASE)
+                elif line.startswith("- "):
+                    mode = "bullets"
+                    bullets.append(line[2:].strip())
+                elif re.match(r"^(>|\\\[|\$\$|\\begin\{tcolorbox\}|\\end\{tcolorbox\}|\\\[|\\\])", line):
+                    mode = "formula"
+                    # Try to extract formula content
+                    formula = re.sub(r"^>+\s*\*\*Formula:?\*\*:?\s*", "", line)
+                    formula = formula.strip('>$ ')
+                    if formula:
+                        formulas.append(formula)
+                elif mode == "summary":
+                    summary += " " + line
+                elif mode == "bullets":
+                    if line.startswith("- "):
+                        bullets.append(line[2:].strip())
+                elif mode == "formula":
+                    formulas.append(line)
+
+            if output_format.lower() == "latex":
+                content = ""
+                if subtopic:
+                    content += f"\\subsection*{{{subtopic}}}\n"
+                if summary:
+                    content += f"\\begin{{tcolorbox}}[colback=blue!5!white, colframe=blue!75!black, title=Summary]\n{summary}\n\\end{{tcolorbox}}\n"
+                if bullets:
+                    content += "\\begin{itemize}\n"
+                    for b in bullets:
+                        content += f"  \\item {b}\n"
+                    content += "\\end{itemize}\n"
+                for f in formulas:
+                    content += f"\\begin{{tcolorbox}}[colback=yellow!10!white, colframe=purple!80!black, title=Formula]\n\\[ {f} \\]\n\\end{{tcolorbox}}\n"
+                return {
+                    "cell_type": "markdown",
+                    "metadata": {},
+                    "source": [content],
+                }
+            else:
+                content = ""
+                if subtopic:
+                    content += f"### {subtopic}\n\n"
+                if summary:
+                    content += f"> **Summary:** {summary}\n\n"
+                if bullets:
+                    for b in bullets:
+                        content += f"- {b}\n"
+                    content += "\n"
+                for f in formulas:
+                    content += f"> **Formula:**\n> $$ {f} $$\n\n"
+                return {
+                    "cell_type": "markdown",
+                    "metadata": {},
+                    "source": [content],
+                }
 
         for idx, doc in enumerate(documents):
             meta = metadatas[idx] if idx < len(metadatas) else {}
@@ -802,5 +949,4 @@ class RAGService:
         return notebook
 
 # Singleton Instance
-rag_service = RAGService()
 rag_service = RAGService()
