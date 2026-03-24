@@ -19,7 +19,9 @@ async def transcribe_audio(request: TranscribeRequest):
         # Use singleton
         result = transcription_service.transcribe(
             audio_path=request.audio_path,
-            language=request.language
+            language=request.language,
+            english_only=request.english_only,
+            translate_to_english=request.translate_to_english
         )
 
         segments = [

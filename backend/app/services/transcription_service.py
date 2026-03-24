@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Optional, List
 from dataclasses import dataclass
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -39,11 +40,25 @@ class TranscriptionService:
         self.model_size = model_size
         logger.info("Model loaded successfully!")
 
+    def _filter_english_text(self, text: str) -> str:
+        # Keep only ASCII letters/digits/basic punctuation/spaces/newlines
+        return re.sub(r"[^A-Za-z0-9\-\.,;:!\?\(\)\[\]\'\"\s]", "", text)
+
+    def _translate_to_english(self, text: str) -> str:
+        # Placeholder translation: if non-ascii content exists, drop non-latin chars.
+        # You can replace this method with a real translator backend later.
+        if re.search(r"[^\x00-\x7F]", text):
+            logger.info("Transcription contains non-ASCII content; applying fallback English translation/cleanup.")
+            return self._filter_english_text(text)
+        return text
+
     def transcribe(
         self,
         audio_path: str,
         language: Optional[str] = None,
-        progress_callback=None
+        progress_callback=None,
+        english_only: bool = False,
+        translate_to_english: bool = False
     ) -> TranscriptionResult:
 
         path = Path(audio_path)
@@ -92,8 +107,24 @@ class TranscriptionService:
         if progress_callback:
             progress_callback(100)
 
+        final_text = " ".join(full_text)
+
+        if translate_to_english:
+            final_text = self._translate_to_english(final_text)
+            # Also update segments text similarly
+            for seg in segments:
+                seg.text = self._translate_to_english(seg.text)
+
+        if english_only:
+            final_text = self._filter_english_text(final_text)
+            for seg in segments:
+                seg.text = self._filter_english_text(seg.text)
+
+        # Remove left-over repeated whitespace
+        final_text = re.sub(r"\s+", " ", final_text).strip()
+
         return TranscriptionResult(
-            text=" ".join(full_text),
+            text=final_text,
             segments=segments,
             language=info.language,
             duration=info.duration

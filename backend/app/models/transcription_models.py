@@ -5,6 +5,8 @@ from typing import List, Optional
 class TranscribeRequest(BaseModel):
     audio_path: str
     language: Optional[str] = None
+    english_only: bool = False
+    translate_to_english: bool = False
 
 
 class SegmentResponse(BaseModel):
