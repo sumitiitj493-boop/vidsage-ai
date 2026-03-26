@@ -103,23 +103,27 @@ async def download_video(request: VideoRequest):
                 }
             
             # CASE B: Auto-Generated (Must Validate)
-            logger.info("Auto-generated transcript found. Running Topic Validation...")
-            validation_result = TranscriptQualityChecker.validate_transcript(
-                youtube_result["text"], 
-                video_title
-            )
-
-            if validation_result["is_valid"]:
-                logger.info("Topic Validation Passed! Using auto-transcript.")
-                cleaned = await TranscriptCleaner.clean(
-                    youtube_result["text"],
-                    use_llm=False  # Speed optimization: Skip slow LLM cleaning
+            if request.force_whisper:
+                logger.info("Force whisper requested by user. Skipping YouTube auto transcript validation and using Whisper.")
+                validation_result = {"is_valid": False, "reason": "force_whisper_requested"}
+            else:
+                logger.info("Auto-generated transcript found. Running Topic Validation...")
+                validation_result = TranscriptQualityChecker.validate_transcript(
+                    youtube_result["text"], 
+                    video_title
                 )
 
-                # Store for RAG immediately (Using segments for timestamps)
-                rag_service.index_video(video_id, youtube_result["segments"])
-                
-                return {
+                if validation_result["is_valid"]:
+                    logger.info("Topic Validation Passed! Using auto-transcript.")
+                    cleaned = await TranscriptCleaner.clean(
+                        youtube_result["text"],
+                        use_llm=False  # Speed optimization: Skip slow LLM cleaning
+                    )
+
+                    # Store for RAG immediately (Using segments for timestamps)
+                    rag_service.index_video(video_id, youtube_result["segments"])
+                    
+                    return {
                     "success": True,
                     "source": "youtube_auto",
                     "video_id": video_id,

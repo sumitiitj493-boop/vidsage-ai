@@ -7,6 +7,7 @@ class VideoRequest(BaseModel):
     video_url: str
     output_format: Optional[str] = "mp3"
     quality: Optional[str] = "192"
+    force_whisper: Optional[bool] = False
 
     @field_validator("video_url")
     @classmethod

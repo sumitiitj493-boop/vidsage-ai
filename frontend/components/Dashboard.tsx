@@ -76,6 +76,7 @@ export default function Dashboard() {
   const [videoUrl, setVideoUrl] = useState("");
   const [downloadState, setDownloadState] = useState<VideoDownloadState>({ status: "idle" });
   const [stage, setStage] = useState<"empty" | "processing" | "ready">("empty");
+  const isProcessing = stage === "processing";
   const [activeMode, setActiveMode] = useState<"transcript" | "notes" | "progress">("transcript");
   const [showTranscript, setShowTranscript] = useState(false);
   const [audioProgress, setAudioProgress] = useState<number | null>(null);
@@ -757,8 +758,9 @@ export default function Dashboard() {
       anchor.click();
       anchor.remove();
       URL.revokeObjectURL(url);
-    } catch (e) {
-      alert("PDF generation failed: " + (e?.message || e));
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      alert("PDF generation failed: " + message);
     }
   };
 
@@ -797,7 +799,7 @@ export default function Dashboard() {
     }
   }, [activeMode, videoId]);
 
-  const handleProcessVideo = async () => {
+  const callProcessVideo = async (opts: { forceWhisper?: boolean } = {}) => {
     setStage("processing");
     setDownloadState({ status: "loading" });
     setChatAnswer(null);
@@ -807,6 +809,7 @@ export default function Dashboard() {
 
     try {
       let data: any;
+      const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
       if (inputMode === "youtube") {
         const rawUrl = videoUrl.trim();
@@ -815,7 +818,10 @@ export default function Dashboard() {
         const res = await fetch(`${apiBase}/api/video/download`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ video_url: normalizedUrl }),
+          body: JSON.stringify({
+            video_url: normalizedUrl,
+            force_whisper: opts.forceWhisper ?? false,
+          }),
         });
         data = await res.json();
         if (!res.ok) throw new Error(data?.detail || data?.message || "Failed to process video");
@@ -841,11 +847,11 @@ export default function Dashboard() {
         if (!res.ok) throw new Error(result?.detail || result?.message || "Failed to upload audio");
         if (!result.job_id) throw new Error("No job id returned");
         setAudioJobId(result.job_id);
-setAudioStatus("uploading");
-      setAudioProgress(0);
-      setAudioElapsed(0);
-      setAudioEstimated(null);
-      setActiveMode("progress");
+        setAudioStatus("uploading");
+        setAudioProgress(0);
+        setAudioElapsed(0);
+        setAudioEstimated(null);
+        setActiveMode("progress");
         data = { video_id: result.job_id, source: "audio_upload" };
         pollAudioStatus(result.job_id);
       }
@@ -884,6 +890,14 @@ setAudioStatus("uploading");
       setDownloadState({ status: "error", error: err instanceof Error ? err.message : String(err) });
       setStage("empty");
     }
+  };
+
+  const handleProcessVideo = async () => {
+    await callProcessVideo();
+  };
+
+  const handleForceWhisper = async () => {
+    await callProcessVideo({ forceWhisper: true });
   };
 
   useEffect(() => {
@@ -1268,6 +1282,19 @@ setAudioStatus("uploading");
                     <h3 className="text-sm font-semibold text-slate-100">{videoTitle || "YouTube Video"}</h3>
                     <p className="text-xs text-slate-400 mt-1">ID: {videoId}</p>
                     <p className="text-xs text-slate-400">Source: {downloadState.response?.source}</p>
+                    {downloadState.response?.source === "youtube_auto" && (
+                      <div className="mt-2">
+                        <p className="text-xs text-amber-300">Auto-generated transcript is in use. If it seems low-quality, try Whisper.</p>
+                        <button
+                          type="button"
+                          onClick={handleForceWhisper}
+                          disabled={isProcessing}
+                          className="mt-2 w-full rounded-lg bg-blue-500 px-3 py-2 text-xs font-semibold text-slate-950 hover:bg-blue-400 disabled:opacity-60"
+                        >
+                          Try Whisper transcription
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -1452,7 +1479,7 @@ setAudioStatus("uploading");
               )}
 
               {activeMode === "transcript" && (
-                <div className="mt-4 max-h-[60vh] rounded-xl border border-white/10 bg-slate-950/40 p-4 text-sm text-slate-200">
+                <div className="mt-4 max-h-[60vh] overflow-y-auto rounded-xl border border-white/10 bg-slate-950/40 p-4 text-sm text-slate-200">
                   {transcriptText ? (
                     <>
                       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -1488,7 +1515,9 @@ setAudioStatus("uploading");
                       </div>
 
                       {showTranscript ? (
-                        <pre className="whitespace-pre-wrap">{transcriptText}</pre>
+                        <div className="max-h-[45vh] overflow-y-auto rounded-lg border border-white/10 bg-slate-900/50 p-3">
+                          <pre className="whitespace-pre-wrap">{transcriptText}</pre>
+                        </div>
                       ) : (
                         <p className="text-slate-400">Transcript hidden. Click “Show transcript” to view.</p>
                       )}
