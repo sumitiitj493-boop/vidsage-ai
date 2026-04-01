@@ -81,7 +81,7 @@ export default function ProcessingLoader({
       steps.push({ label: "Falling back to Whisper AI. Downloading stream...", start: 5.5, done: s > 8.0, forceDone: false });
       if (s > 8.0) {
         steps.push({ label: "Running Whisper AI (Local GPU/CPU processing).", start: 8.0, done: false, forceDone: false });
-        steps.push({ label: "This step takes roughly 30-60 seconds depending on length...", start: 9.5, done: false, forceDone: false, isSub: true });
+        steps.push({ label: "Generating high-accuracy transcripts from audio. Please wait...", start: 9.5, done: false, forceDone: false, isSub: true });
       }
     }
   } else {
@@ -95,37 +95,6 @@ export default function ProcessingLoader({
       steps.push({ label: "Processing knowledge graph features...", start: 5.0, done: false, forceDone: false });
     }
   }
-
-  // Calculate synthetic progress percentage
-  // YouTube normal: completes around 3-4s. 
-  // YouTube Whisper: takes 45s.
-  // We'll push progress quickly to 40%, then slowly crawl up to 98% if we hit Whisper time.
-  let progress = 0;
-  if (inputMode === "youtube") {
-    if (s < 4.5) {
-      progress = Math.min((s / 4.5) * 60, 60); // fast to 60%
-    } else {
-      progress = 60 + Math.min(((s - 4.5) / 45) * 38, 38); // slow crawl to 98% over 45s
-    }
-  } else {
-    progress = Math.min((s / 10) * 95, 98); 
-  }
-
-  // Update estimated time every 5%
-  const quantizedProgress = Math.max(1, Math.floor(progress / 5) * 5);
-  let estLeft = 0;
-  if (quantizedProgress > 0 && quantizedProgress < 100) {
-    // If it's a Youtube Whisper crawl, use a realistic total estimate so it doesn't jump wildly
-    if (inputMode === "youtube" && s > 4.5) {
-      const fixedTotal = 55; // Roughly 55s average wait for Whisper fallback
-      estLeft = Math.max(0, fixedTotal - s);
-    } else {
-      estLeft = (s / quantizedProgress) * (100 - quantizedProgress);
-    }
-  }
-  
-  const formattedElapsed = Math.round(s);
-  const formattedEstLeft = Math.round(estLeft);
 
   return (
     <div className="w-full bg-slate-900/60 backdrop-blur-2xl border border-white/5 rounded-[2rem] p-8 md:p-12 shadow-2xl relative overflow-hidden">
@@ -165,24 +134,29 @@ export default function ProcessingLoader({
         })}
       </div>
       
-      {/* Progress Bar */}
+      {/* Indeterminate Progress Bar */}
       <div className="relative z-10">
         <div className="flex justify-between text-[11px] text-slate-400 mb-2 font-mono uppercase tracking-wider">
           <span>System Operation Active</span>
-          <span className="text-emerald-400 font-bold">{Math.floor(progress)}%</span>
+          <span className="text-emerald-400 font-bold animate-pulse">Processing...</span>
         </div>
-        <div className="w-full h-2 bg-slate-800/80 rounded-full overflow-hidden border border-white/5 mb-3">
+        <div className="w-full h-2 bg-slate-800/80 rounded-full overflow-hidden border border-white/5 mb-3 relative">
           <div 
-            className="h-full bg-gradient-to-r from-emerald-500 to-amber-400 rounded-full transition-all duration-300 ease-out"
-            style={{ width: `${progress}%` }}
+            className="absolute top-0 bottom-0 w-1/2 bg-gradient-to-r from-transparent via-emerald-500 to-transparent rounded-full opacity-80"
+            style={{ animation: 'indeterminateSlide 2s infinite ease-in-out' }}
           />
         </div>
         <div className="flex justify-between text-xs text-slate-500 font-mono">
-          <span>Elapsed: {formattedElapsed}s</span>
-          <span>Est. Left: {formattedEstLeft > 0 ? `${formattedEstLeft}s` : 'Finishing...'}</span>
+          <span>Elapsed Time: {Math.round(s)}s</span>
         </div>
       </div>
-
+      
+      <style dangerouslySetInnerHTML={{__html: `
+        @keyframes indeterminateSlide {
+          0% { left: -50%; }
+          100% { left: 100%; }
+        }
+      `}} />
     </div>
   );
 }
