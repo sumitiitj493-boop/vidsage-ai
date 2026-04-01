@@ -21,6 +21,7 @@ import TranscriptView from "./dashboard/TranscriptView";
 import NotesView from "./dashboard/NotesView";
 import ChatWindow from "./dashboard/ChatWindow";
 import LandingView from "./dashboard/LandingView";
+import ProcessingLoader from "./dashboard/ProcessingLoader";
 
 export default function Dashboard() {
   const processor = useVideoProcessor();
@@ -108,15 +109,15 @@ export default function Dashboard() {
 
         <main className="flex-1 overflow-y-auto px-6 pb-10 custom-scrollbar">
           {processor.stage === "processing" && (
-            <div className="mt-24 flex flex-col items-center justify-center animate-fade-in">
-              <div className="flex flex-col items-center p-12 rounded-3xl border border-emerald-500/10 bg-emerald-500/5 shadow-2xl shadow-emerald-500/10">
-                <div className="relative mb-6">
-                  <div className="absolute inset-0 bg-amber-400 blur-xl opacity-30 rounded-full animate-pulse"></div>
-                  <div className="h-16 w-16 relative border-4 border-amber-500/20 border-t-amber-400 rounded-full animate-spin"></div>
-                </div>
-                <h2 className="text-2xl font-bold text-white mb-2 tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-emerald-300 to-amber-300">Extracting the Wisdom...</h2>
-                <p className="text-slate-400 text-sm font-medium">Agents are analyzing your content in real time.</p>
-              </div>
+            <div className="mt-24 flex flex-col items-center justify-center animate-fade-in w-full max-w-3xl mx-auto">
+              <ProcessingLoader 
+                  inputMode={processor.inputMode} 
+                  audioJobId={processor.audioJobId} 
+                  audioProgress={processor.audioProgress} 
+                  audioStatus={processor.audioStatus} 
+                  audioElapsed={processor.audioElapsed} 
+                  audioEstimated={processor.audioEstimated} 
+              />
             </div>
           )}
 
