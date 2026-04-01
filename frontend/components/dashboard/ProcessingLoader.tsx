@@ -111,6 +111,22 @@ export default function ProcessingLoader({
     progress = Math.min((s / 10) * 95, 98); 
   }
 
+  // Update estimated time every 5%
+  const quantizedProgress = Math.max(1, Math.floor(progress / 5) * 5);
+  let estLeft = 0;
+  if (quantizedProgress > 0 && quantizedProgress < 100) {
+    // If it's a Youtube Whisper crawl, use a realistic total estimate so it doesn't jump wildly
+    if (inputMode === "youtube" && s > 4.5) {
+      const fixedTotal = 55; // Roughly 55s average wait for Whisper fallback
+      estLeft = Math.max(0, fixedTotal - s);
+    } else {
+      estLeft = (s / quantizedProgress) * (100 - quantizedProgress);
+    }
+  }
+  
+  const formattedElapsed = Math.round(s);
+  const formattedEstLeft = Math.round(estLeft);
+
   return (
     <div className="w-full bg-slate-900/60 backdrop-blur-2xl border border-white/5 rounded-[2rem] p-8 md:p-12 shadow-2xl relative overflow-hidden">
       {/* Decorative BG */}
@@ -151,15 +167,19 @@ export default function ProcessingLoader({
       
       {/* Progress Bar */}
       <div className="relative z-10">
-        <div className="flex justify-between text-xs text-slate-400 mb-2 font-mono uppercase tracking-wider">
+        <div className="flex justify-between text-[11px] text-slate-400 mb-2 font-mono uppercase tracking-wider">
           <span>System Operation Active</span>
           <span className="text-emerald-400 font-bold">{Math.floor(progress)}%</span>
         </div>
-        <div className="w-full h-2 bg-slate-800/80 rounded-full overflow-hidden border border-white/5">
+        <div className="w-full h-2 bg-slate-800/80 rounded-full overflow-hidden border border-white/5 mb-3">
           <div 
             className="h-full bg-gradient-to-r from-emerald-500 to-amber-400 rounded-full transition-all duration-300 ease-out"
             style={{ width: `${progress}%` }}
           />
+        </div>
+        <div className="flex justify-between text-xs text-slate-500 font-mono">
+          <span>Elapsed: {formattedElapsed}s</span>
+          <span>Est. Left: {formattedEstLeft > 0 ? `${formattedEstLeft}s` : 'Finishing...'}</span>
         </div>
       </div>
 
