@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { NotesFormat } from "../lib/types/dashboard";
 import { stripEmojis, keepEnglishOnly } from "../lib/utils/formatters";
-import { convertMarkdownToHtmlStr } from "../lib/utils/markdown";
+import { convertMarkdownToHtmlStr, normalizeMathMarkdown } from "../lib/utils/markdown";
 
 export function useNotes(videoId: string | undefined | null, videoTitle: string, activeMode: string) {
   const [notesNotebook, setNotesNotebook] = useState<any | null>(null);
@@ -48,11 +48,20 @@ export function useNotes(videoId: string | undefined | null, videoTitle: string,
   // Generators for the different file types
   const getNotesHtml = useCallback(() => {
     if (!notesNotebook) return "";
-    const cellsHtml = notesNotebook.cells
+    const customCellsHtml = notesNotebook.cells
       ?.map((cell: any) => {
         if (!cell || cell.cell_type !== "markdown") return "";
-        const src = Array.isArray(cell.source) ? cell.source.join("") : String(cell.source);
-        return convertMarkdownToHtmlStr(src);
+        let src = Array.isArray(cell.source) ? cell.source.join("") : String(cell.source);
+        
+        // Clean timestamp / segment lines if present
+        src = src.split("\n")
+                 .filter((line: string) => !/^\\s*-?\\s*Timestamp\\s*[:=]/i.test(line))
+                 .filter((line: string) => !/^\\s*Segment\\s*\\(.*\\)/i.test(line))
+           .join("\n");
+
+        const normalized = normalizeMathMarkdown(src, videoId ?? "");
+        const cellHtml = convertMarkdownToHtmlStr(normalized);
+        return `<div class="notebook-cell">\n${cellHtml}\n</div>`;
       })
       .join("\n");
 
@@ -62,25 +71,83 @@ export function useNotes(videoId: string | undefined | null, videoTitle: string,
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${videoTitle || "Notes"}</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.5.0/github-markdown.min.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css" />
   <style>
-    body { background: #0d1117; color: #c9d1d9; font-family: system-ui, sans-serif; padding: 2rem; }
-    h1, h2, h3 { color: #f0f6fc; }
+    body { background-color: #0d1117; padding: 40px; font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    .notes-container { max-width: 900px; margin: 0 auto; }
     .notes-header {
       background: linear-gradient(135deg, #0d1117 0%, #161b22 50%, #1a1f29 100%);
       padding: 24px; border-left: 6px solid #a371f7; border-radius: 12px;
-      margin-bottom: 24px; box-shadow: 0 4px 15px rgba(163, 113, 247, 0.2);
+      margin-bottom: 32px; box-shadow: 0 4px 15px rgba(163, 113, 247, 0.2);
     }
-    .notes-header h1 { margin: 0; font-size: 2.25rem; }
-    .card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 18px; margin-bottom: 18px; }
+    .notes-header h1 { margin: 0 0 8px 0; font-size: 2.25rem; color: #f0f6fc; }
+    .notes-header p { margin: 0; color: #8b949e; font-size: 1.1rem; }
+    .markdown-body {
+      box-sizing: border-box; min-width: 200px; margin: 0 auto;
+      background-color: transparent; padding: 0;
+    }
+    .notebook-cell {
+      background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+      padding: 32px; margin-bottom: 24px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+      transition: border-color 0.2s ease;
+    }
+    
+    /* Beautiful Custom Overrides */
+    .markdown-body h1, .markdown-body h2, .markdown-body h3 {
+      color: #d2a8ff;
+      border-bottom: 1px solid #30363d;
+      padding-bottom: 0.3em;
+    }
+    .markdown-body a { color: #58a6ff; text-decoration: none; font-weight: 500; }
+    .markdown-body a:hover { text-decoration: underline; }
+    
+    /* Callout / Box styling for Blockquotes */
+    .markdown-body blockquote {
+      margin: 1.5em 0;
+      padding: 1em 1.2em;
+      color: #c9d1d9;
+      background-color: rgba(163, 113, 247, 0.1);
+      border-left: 4px solid #a371f7;
+      border-radius: 4px;
+    }
+    
+    /* Highlighted Code / Math visibility improvements */
+    .markdown-body pre { background-color: #0d1117; border: 1px solid #30363d; border-radius: 8px; }
+    .katex-display { margin: 1.5em 0; overflow-x: auto; overflow-y: hidden; }
+    
+    @media (prefers-color-scheme: light) {
+      body { background-color: #f6f8fa; }
+      .notes-header { background: #ffffff; box-shadow: 0 4px 15px rgba(163, 113, 247, 0.15); }
+      .notes-header h1 { color: #24292f; }
+      .notes-header p { color: #57606a; }
+      .notebook-cell { background: #ffffff; border-color: #d0d7de; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+      
+      .markdown-body h1, .markdown-body h2, .markdown-body h3 { color: #6f42c1; border-bottom-color: #d0d7de; }
+      .markdown-body a { color: #0969da; }
+      .markdown-body blockquote { background-color: rgba(111, 66, 193, 0.08); border-left-color: #6f42c1; color: #24292f; }
+      .markdown-body pre { background-color: #f6f8fa; border-color: #d0d7de; }
+    }
+    
+    @media print {
+      body { padding: 0; background-color: white; }
+      .notes-container { max-width: 100%; }
+      .notebook-cell { border: none; padding: 0; margin-bottom: 30px; box-shadow: none; page-break-inside: avoid; }
+      .notes-header { box-shadow: none; border-left: 4px solid #a371f7; background: #f6f8fa; }
+      .notes-header h1 { color: #000; }
+    }
   </style>
 </head>
 <body>
-  <div class="notes-header">
-    <h1>🚀 Masterclass Notes</h1>
-    <p>Generated from transcript</p>
-  </div>
-  <div class="card">
-    ${cellsHtml}
+  <div class="notes-container">
+    <div class="notes-header">
+      <h1>🚀 Masterclass Notes</h1>
+      <p>Generated from transcript</p>
+    </div>
+    <div class="markdown-body">
+      ${customCellsHtml}
+    </div>
   </div>
 </body>
 </html>`;
@@ -104,15 +171,41 @@ export function useNotes(videoId: string | undefined | null, videoTitle: string,
         text = text.replace(/^##\s*(.+)$/gm, "\\subsection{$1}");
         text = text.replace(/^#\s*(.+)$/gm, "\\section{$1}");
 
+        // Bold and italic
+        text = text.replace(/\*\*(.*?)\*\*/g, "\\textbf{$1}");
+        text = text.replace(/\*(.*?)\*/g, "\\textit{$1}");
+        text = text.replace(/__(.*?)__/g, "\\textbf{$1}");
+        text = text.replace(/_(.*?)_/g, "\\textit{$1}");
+
+        // Basic inline formula parsing (if present)
+        text = text.replace(/\$\$(.*?)\$\$/g, "\\[ $1 \\]"); // Block
+        text = text.replace(/\$(.*?)\$/g, "\\($1\\)"); // Inline
+
         const lines = text.split("\n");
         let inItemize = false;
+        let inBlockquote = false;
         const out = [];
         for (let rawLine of lines) {
           const trimmed = rawLine.trim();
           if (!trimmed) {
             if (inItemize) { out.push("\\end{itemize}"); inItemize = false; }
+            if (inBlockquote) { out.push("\\end{tcolorbox}"); inBlockquote = false; }
             out.push(""); continue;
           }
+          
+          const bqMatch = trimmed.match(/^>\s*(.*)$/);
+          if (bqMatch) {
+            if (inItemize) { out.push("\\end{itemize}"); inItemize = false; }
+            if (!inBlockquote) { 
+               out.push("\\begin{tcolorbox}[colback=blue!5!white, colframe=blue!75!black, title=Key Insight, breakable]"); 
+               inBlockquote = true; 
+            }
+            out.push(bqMatch[1]);
+            continue;
+          } else {
+            if (inBlockquote) { out.push("\\end{tcolorbox}"); inBlockquote = false; }
+          }
+          
           const itemMatch = trimmed.match(/^[-*+]\s+(.+)$/);
           if (itemMatch) {
             if (!inItemize) { out.push("\\begin{itemize}"); inItemize = true; }
@@ -123,12 +216,32 @@ export function useNotes(videoId: string | undefined | null, videoTitle: string,
           out.push(trimmed);
         }
         if (inItemize) out.push("\\end{itemize}");
+        if (inBlockquote) out.push("\\end{tcolorbox}");
         return out.join("\n");
       })
       .join("\n\n");
 
     const safeTitle = keepEnglishOnly(stripEmojis(videoTitle || "Notes"));
-    return `\\documentclass{article}\\usepackage{amsmath,amssymb}\\begin{document}\\title{${safeTitle}}\\maketitle\n\n${content}\n\\end{document}`;
+    const fancyPreamble = `\\documentclass{article}
+\\usepackage[margin=1in]{geometry}
+\\usepackage{amsmath,amssymb}
+\\usepackage[utf8]{inputenc}
+\\usepackage[T1]{fontenc}
+\\usepackage{xcolor}
+\\usepackage{tcolorbox}
+\\tcbuselibrary{skins,breakable}
+\\usepackage{listings}
+\\usepackage{enumitem}
+\\usepackage{fancyhdr}
+\\usepackage{sectsty}
+\\sectionfont{\\color{blue!80!black}}
+\\subsectionfont{\\color{purple!80!black}}
+\\subsubsectionfont{\\color{teal!80!black}}
+\\begin{document}
+\\title{${safeTitle}}
+\\maketitle
+`;
+    return `${fancyPreamble}\n${content}\n\\end{document}`;
   }, [notesNotebook, videoTitle]);
 
   // Downloader utilities
@@ -210,8 +323,11 @@ export function useNotes(videoId: string | undefined | null, videoTitle: string,
   const downloadNotesPdfBackend = async () => {
     if (!notesNotebook || !videoId) return;
     try {
-      const response = await fetch(`http://localhost:8000/api/notes/download/pdf/${videoId}`, {
-        method: "GET"
+      const latex_code = getNotesLatex();
+      const response = await fetch("http://localhost:8000/api/notes/compile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ latex_code: latex_code })
       });
       if (!response.ok) throw new Error("Failed to download backend PDF");
       const blob = await response.blob();

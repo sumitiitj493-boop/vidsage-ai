@@ -154,6 +154,20 @@ export function useVideoProcessor() {
     setAudioEstimated(null);
   };
 
+  const loadSession = (videoId: string, title?: string) => {
+    setDownloadState({ 
+      status: "done", 
+      response: {
+        video_id: videoId,
+        video_title: title || "Historical Session",
+        cleaned_text: "Transcript not cached for historical sessions. Please re-process the URL for the full transcript."
+      } 
+    });
+    setStage("ready");
+    setTranscriptText("Transcript not cached for historical sessions. Please re-process the URL for the full transcript.");
+    setActiveMode("transcript");
+  };
+
   return {
     videoUrl, setVideoUrl,
     inputMode, setInputMode,
@@ -169,5 +183,6 @@ export function useVideoProcessor() {
     isProcessing,
     processVideo,
     resetSession,
+    loadSession,
   };
 }

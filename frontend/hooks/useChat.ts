@@ -1,13 +1,14 @@
 import { useState, useRef, useEffect } from "react";
-import { ChatMessage } from "../lib/types/dashboard";
+import { ChatMessage, ChatSession } from "../lib/types/dashboard";
 
-export function useChat(videoId: string | undefined | null) {
+export function useChat(videoId: string | undefined | null, videoTitle?: string) {
   const [chatQuestion, setChatQuestion] = useState("");
   const [chatAnswer, setChatAnswer] = useState<string | null>(null);
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [chatIndex, setChatIndex] = useState(-1);
   const [chatLoading, setChatLoading] = useState(false);
   const [chatOutputMode, setChatOutputMode] = useState<"markdown" | "latex">("markdown");
+  const [allSessions, setAllSessions] = useState<Record<string, ChatSession>>({});
   
   const chatContainerRef = useRef<HTMLDivElement | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
@@ -20,25 +21,59 @@ export function useChat(videoId: string | undefined | null) {
     chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
   }, [chatHistory, chatLoading]);
 
-  // Persist history
+  // Load all sessions and current session
   useEffect(() => {
-    const stored = localStorage.getItem("vidsage_chat_history");
+    const stored = localStorage.getItem("vidsage_all_sessions");
+    let sessions: Record<string, ChatSession> = {};
     if (stored) {
       try {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed)) {
-          setChatHistory(parsed);
-          setChatIndex(parsed.length - 1);
-        }
+        sessions = JSON.parse(stored);
+        setAllSessions(sessions);
       } catch {
         // ignore
       }
     }
-  }, []);
 
+    if (videoId) {
+      const currentSession = sessions[videoId];
+      if (currentSession?.messages) {
+        setChatHistory(currentSession.messages);
+        setChatIndex(currentSession.messages.length - 1);
+      } else {
+        setChatHistory([]);
+        setChatIndex(-1);
+      }
+      setChatAnswer(null);
+      setChatQuestion("");
+    } else {
+      setChatHistory([]);
+      setChatIndex(-1);
+      setChatAnswer(null);
+      setChatQuestion("");
+    }
+  }, [videoId]);
+
+  // Save current session to all sessions
   useEffect(() => {
-    localStorage.setItem("vidsage_chat_history", JSON.stringify(chatHistory));
-  }, [chatHistory]);
+    if (!videoId) return;
+    
+    // Only save if there's actually a history
+    setAllSessions((prev) => {
+      const updated = {
+        ...prev,
+        [videoId]: {
+          id: videoId,
+          title: videoTitle || prev[videoId]?.title || "Untitled Video",
+          updatedAt: Date.now(),
+          messages: chatHistory
+        }
+      };
+      
+      // If we just cleared it, maybe we don't want to save an empty array, but updating is safer
+      localStorage.setItem("vidsage_all_sessions", JSON.stringify(updated));
+      return updated;
+    });
+  }, [chatHistory, videoId, videoTitle]);
 
   const askQuestion = async (question: string) => {
     if (!videoId || !question.trim()) return;
@@ -104,7 +139,29 @@ export function useChat(videoId: string | undefined | null) {
     setChatIndex(-1);
     setChatQuestion("");
     setChatAnswer(null);
-    localStorage.removeItem("vidsage_chat_history");
+    if (videoId) {
+      setAllSessions((prev) => {
+        const cp = { ...prev };
+        delete cp[videoId];
+        localStorage.setItem("vidsage_all_sessions", JSON.stringify(cp));
+        return cp;
+      });
+    }
+  };
+
+  const deleteSessionHistory = (idToDelete: string) => {
+    setAllSessions((prev) => {
+      const cp = { ...prev };
+      delete cp[idToDelete];
+      localStorage.setItem("vidsage_all_sessions", JSON.stringify(cp));
+      return cp;
+    });
+    if (idToDelete === videoId) {
+      setChatHistory([]);
+      setChatIndex(-1);
+      setChatQuestion("");
+      setChatAnswer(null);
+    }
   };
 
   return {
@@ -117,6 +174,8 @@ export function useChat(videoId: string | undefined | null) {
     chatContainerRef,
     chatEndRef,
     askQuestion,
-    clearChatHistory
+    clearChatHistory,
+    allSessions,
+    deleteSessionHistory
   };
 }

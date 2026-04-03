@@ -16,11 +16,12 @@ interface HeaderProps {
   resetSession: () => void;
   fileInputRef: RefObject<HTMLInputElement>;
   audioInputRef: RefObject<HTMLInputElement>;
+  onOpenHistory?: () => void;
 }
 
 export default function DashboardHeader({
   videoUrl, setVideoUrl, inputMode, setInputMode, pdfFile, setPdfFile, audioFile, setAudioFile,
-  stage, handleProcessVideo, resetSession, fileInputRef, audioInputRef
+  stage, handleProcessVideo, resetSession, fileInputRef, audioInputRef, onOpenHistory
 }: HeaderProps) {
   const canProcess =
     stage !== "processing" &&
@@ -140,7 +141,7 @@ export default function DashboardHeader({
           New Session
         </button>
         <button
-          onClick={() => alert("History coming soon")}
+          onClick={onOpenHistory}
           className="rounded-xl border border-white/10 bg-slate-900/50 px-5 py-2.5 text-sm font-medium text-slate-200 hover:bg-slate-800 transition-colors"
         >
           History

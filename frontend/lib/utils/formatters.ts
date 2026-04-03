@@ -22,23 +22,53 @@ export const stripEmojis = (str: string) => {
 };
 
 export const keepEnglishOnly = (str: string) => {
-  return str.replace(/[^A-Za-z0-9\s\.,;:!\?\'\"\-\(\)\[\]]+/g, "");
+  // Allow English alphabet, numbers, and all common markdown/coding symbols to preserve formatting
+  return str.replace(/[^A-Za-z0-9\s\.,;:!\?\'\"\-\(\)\[\]#\*<>\$=_\+\\\{\}%&\|\^@~\/]+/g, "");
 };
 
 export const linkifyTimestamps = (text: string, videoId: string) => {
-  // Match timestamps like 0:20, 00:20, 1:02:15 and ranges like 0:20-0:35 or 0:20 - 0:35
-  const regex = /(\b\d{1,2}:\d{2}(?::\d{2})?\b)(?:\s*[-–—]\s*(\d{1,2}:\d{2}(?::\d{2})?\b))?/g;
-  return text.replace(regex, (match, start, end) => {
-    const startSeconds = parseTimestamp(start);
-    if (startSeconds === null) return match;
+  // Replace timestamps only when they are NOT inside an existing markdown link: [...] or (...)
+  // We can do this by first matching all brackets, and replacing outside them.
+  // A safe way is to split by `markdown links` and only run the regex on the text parts.
+  
+  const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
+  
+  let parts = [];
+  let lastIndex = 0;
+  let match;
 
-    const link = `https://www.youtube.com/watch?v=${videoId}&t=${startSeconds}s`;
-    if (!end) return `[${start}](${link})`;
+  while ((match = linkRegex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+    parts.push(match[0]); // Push the whole markdown link unchanged
+    lastIndex = linkRegex.lastIndex;
+  }
+  
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
 
-    const endSeconds = parseTimestamp(end);
-    if (endSeconds === null) return `[${start}](${link}) — ${end}`;
+  const timestampRegex = /(\b\d{1,2}:\d{2}(?::\d{2})?\b)(?:\s*[-–—]\s*(\d{1,2}:\d{2}(?::\d{2})?\b))?/g;
 
-    // Render range as two clickable timestamps (start + end)
-    return `[${start}](${link}) – [${end}](https://www.youtube.com/watch?v=${videoId}&t=${endSeconds}s)`;
-  });
+  return parts.map(part => {
+    // If it's a markdown link, leave it alone
+    if (part.startsWith("[") && part.endsWith(")") && part.includes("](")) {
+      return part;
+    }
+
+    return part.replace(timestampRegex, (m, start, end) => {
+      const startSeconds = parseTimestamp(start);
+      if (startSeconds === null) return m;
+
+      const link = `https://www.youtube.com/watch?v=${videoId}&t=${startSeconds}s`;
+      if (!end) return `[${start}](${link})`;
+
+      const endSeconds = parseTimestamp(end);
+      if (endSeconds === null) return `[${start}](${link}) — ${end}`;
+
+      // Render range as two clickable timestamps (start + end)
+      return `[${start}](${link}) – [${end}](https://www.youtube.com/watch?v=${videoId}&t=${endSeconds}s)`;
+    });
+  }).join("");
 };

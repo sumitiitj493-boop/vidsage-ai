@@ -10,6 +10,13 @@ export interface ChatMessage {
   format: "markdown" | "latex";
 }
 
+export interface ChatSession {
+  id: string;
+  title: string;
+  updatedAt: number;
+  messages: ChatMessage[];
+}
+
 export type InputMode = "youtube" | "pdf" | "audio";
 export type DashboardStage = "empty" | "processing" | "ready";
 export type ActiveMode = "transcript" | "notes" | "progress";
