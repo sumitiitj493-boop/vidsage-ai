@@ -8,6 +8,7 @@ export function useChat(videoId: string | undefined | null, videoTitle?: string)
   const [chatIndex, setChatIndex] = useState(-1);
   const [chatLoading, setChatLoading] = useState(false);
   const [chatOutputMode, setChatOutputMode] = useState<"markdown" | "latex">("markdown");
+  const [chatLanguage, setChatLanguage] = useState<string>("auto");
   const [allSessions, setAllSessions] = useState<Record<string, ChatSession>>({});
   
   const chatContainerRef = useRef<HTMLDivElement | null>(null);
@@ -84,7 +85,7 @@ export function useChat(videoId: string | undefined | null, videoTitle?: string)
       const res = await fetch(`${apiBase}/api/chat/ask/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ video_id: videoId, question, format: chatOutputMode }),
+        body: JSON.stringify({ video_id: videoId, question, format: chatOutputMode, language: chatLanguage }),
       });
 
       if (!res.ok) {
@@ -171,6 +172,7 @@ export function useChat(videoId: string | undefined | null, videoTitle?: string)
     chatIndex, setChatIndex,
     chatLoading,
     chatOutputMode, setChatOutputMode,
+    chatLanguage, setChatLanguage,
     chatContainerRef,
     chatEndRef,
     askQuestion,

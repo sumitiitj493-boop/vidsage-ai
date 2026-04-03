@@ -185,6 +185,7 @@ export default function Dashboard() {
                       setChatQuestion={chat.setChatQuestion} chatLoading={chat.chatLoading} askQuestion={chat.askQuestion}
                       clearChatHistory={chat.clearChatHistory} suggestedQuestions={processor.suggestedQuestions}
                       renderMarkdownAnswer={renderMarkdownAnswer} renderLatexAnswer={renderLatexAnswer} chatContainerRef={chat.chatContainerRef}
+                      chatLanguage={chat.chatLanguage} setChatLanguage={chat.setChatLanguage}
                     />
                   </div>
                 </div>
@@ -230,6 +231,7 @@ export default function Dashboard() {
               clearChatHistory={chat.clearChatHistory} suggestedQuestions={processor.suggestedQuestions}
               renderMarkdownAnswer={renderMarkdownAnswer} renderLatexAnswer={renderLatexAnswer} chatContainerRef={chat.chatContainerRef}
               fullScreenTutorMode={fullScreenTutorMode} onToggleTutorMode={() => setFullScreenTutorMode(p => !p)}
+              chatLanguage={chat.chatLanguage} setChatLanguage={chat.setChatLanguage}
             />
           </div>
 

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Copy } from "lucide-react";
+import { Copy, ZoomIn, ZoomOut, Type, FileText } from "lucide-react";
 
 interface TranscriptViewProps {
   transcriptText: string;
@@ -9,6 +9,16 @@ interface TranscriptViewProps {
 export default function TranscriptView({ transcriptText, setTranscriptText }: TranscriptViewProps) {
   const [showTranscript, setShowTranscript] = useState(false);
   const [copyHint, setCopyHint] = useState("");
+  
+  // Text formatting state
+  const [fontSize, setFontSize] = useState(15);
+  const [fontFamily, setFontFamily] = useState<"font-sans" | "font-serif" | "font-mono">("font-sans");
+
+  const cycleFontFamily = () => {
+    if (fontFamily === "font-sans") setFontFamily("font-serif");
+    else if (fontFamily === "font-serif") setFontFamily("font-mono");
+    else setFontFamily("font-sans");
+  };
 
   const copyToClipboard = async () => {
     try {
@@ -35,7 +45,43 @@ export default function TranscriptView({ transcriptText, setTranscriptText }: Tr
                 <span className="h-2 w-2 rounded-full bg-emerald-500"></span>
                 <span className="text-xs font-medium text-slate-300 uppercase tracking-wider">Raw Transcript Available</span>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {showTranscript && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setFontSize(Math.max(10, fontSize - 1))}
+                      className="p-1.5 rounded-md bg-white/5 border border-white/10 text-slate-300 hover:bg-white/10 transition-colors"
+                      title="Decrease font size"
+                    >
+                      <ZoomOut className="h-4 w-4" />
+                    </button>
+                    <div className="bg-slate-950/50 px-2 py-1 rounded border border-white/5 text-xs text-slate-400 font-mono w-8 text-center">{fontSize}</div>
+                    <button
+                      type="button"
+                      onClick={() => setFontSize(Math.min(30, fontSize + 1))}
+                      className="p-1.5 rounded-md bg-white/5 border border-white/10 text-slate-300 hover:bg-white/10 transition-colors"
+                      title="Increase font size"
+                    >
+                      <ZoomIn className="h-4 w-4" />
+                    </button>
+                    
+                    <div className="h-4 w-px bg-white/10 mx-1"></div>
+
+                    <button
+                      type="button"
+                      onClick={cycleFontFamily}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-white/5 border border-white/10 text-xs font-medium text-slate-300 hover:bg-white/10 transition-colors capitalize"
+                      title="Change font style"
+                    >
+                      <Type className="h-3 w-3" />
+                      {fontFamily.split('-')[1]}
+                    </button>
+                    
+                    <div className="h-4 w-px bg-white/10 mx-1"></div>
+                  </>
+                )}
+
                 <button
                   type="button"
                   onClick={copyToClipboard}
@@ -70,8 +116,8 @@ export default function TranscriptView({ transcriptText, setTranscriptText }: Tr
             </div>
 
             {showTranscript ? (
-              <div className="max-h-[45vh] overflow-y-auto rounded-lg border border-white/5 bg-slate-900/60 p-4 font-mono text-[13px] leading-snug text-slate-300 shadow-inner custom-scrollbar">
-                <pre className="whitespace-pre-wrap font-sans">{transcriptText}</pre>
+              <div className={`max-h-[45vh] overflow-y-auto rounded-lg border border-white/5 bg-slate-900/60 p-4 leading-relaxed text-slate-300 shadow-inner custom-scrollbar ${fontFamily}`} style={{ fontSize: `${fontSize}px` }}>
+                <pre className={`whitespace-pre-wrap ${fontFamily}`} style={{ fontSize: `${fontSize}px` }}>{transcriptText}</pre>
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center py-10 text-slate-500 border-2 border-dashed border-white/5 rounded-xl bg-black/10">
@@ -93,6 +139,3 @@ export default function TranscriptView({ transcriptText, setTranscriptText }: Tr
     </main>
   );
 }
-
-// Just defining the missing import
-import { FileText } from "lucide-react";

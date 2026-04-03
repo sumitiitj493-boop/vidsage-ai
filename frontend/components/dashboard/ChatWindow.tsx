@@ -18,6 +18,8 @@ interface ChatWindowProps {
   renderMarkdownAnswer: (text: string) => ReactNode;
   renderLatexAnswer: (text: string) => ReactNode;
   chatContainerRef: React.RefObject<HTMLDivElement>;
+  chatLanguage: string;
+  setChatLanguage: (lang: string) => void;
   fullScreenTutorMode?: boolean;
   onToggleTutorMode?: () => void;
 }
@@ -26,7 +28,7 @@ export default function ChatWindow({
   title, subtitle, isFullScreen, onToggleFullScreen, chatHistory, chatIndex,
   chatQuestion, setChatQuestion, chatLoading, askQuestion,
   clearChatHistory, suggestedQuestions, renderMarkdownAnswer, renderLatexAnswer,
-  chatContainerRef, fullScreenTutorMode, onToggleTutorMode
+  chatContainerRef, chatLanguage, setChatLanguage, fullScreenTutorMode, onToggleTutorMode
 }: ChatWindowProps) {
 
   return (
@@ -54,6 +56,19 @@ export default function ChatWindow({
               <span className="text-[10px] opacity-80">{fullScreenTutorMode ? "ON" : "OFF"}</span>
             </button>
           )}
+          
+          <select
+            value={chatLanguage}
+            onChange={(e) => setChatLanguage(e.target.value)}
+            className="h-8 rounded-full bg-slate-800/80 border border-white/10 text-slate-200 text-xs px-3 focus:outline-none focus:border-amber-500/50"
+            title="Chat Language"
+          >
+            <option value="auto">Auto-Detect</option>
+            <option value="english">English</option>
+            <option value="hindi">Hindi (Devanagari)</option>
+            <option value="hinglish">Hinglish</option>
+          </select>
+
           <button
             type="button"
             onClick={onToggleFullScreen}
