@@ -4,9 +4,10 @@ import { Copy, ZoomIn, ZoomOut, Type, FileText } from "lucide-react";
 interface TranscriptViewProps {
   transcriptText: string;
   setTranscriptText: (text: string) => void;
+  inputMode?: string;
 }
 
-export default function TranscriptView({ transcriptText, setTranscriptText }: TranscriptViewProps) {
+export default function TranscriptView({ transcriptText, setTranscriptText, inputMode }: TranscriptViewProps) {
   const [showTranscript, setShowTranscript] = useState(false);
   const [copyHint, setCopyHint] = useState("");
   
@@ -34,7 +35,7 @@ export default function TranscriptView({ transcriptText, setTranscriptText }: Tr
   return (
     <main className="rounded-2xl border border-white/10 bg-slate-900/50 p-6 backdrop-blur-2xl shadow-xl shadow-black/30">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-semibold text-white">Transcript</h2>
+        <h2 className="text-xl font-semibold text-white">{inputMode === 'pdf' ? 'Extracted Report' : 'Transcript'}</h2>
       </div>
 
       <div className="max-h-[60vh] overflow-y-auto rounded-xl border border-white/10 bg-slate-950/40 p-5 text-sm text-slate-200 custom-scrollbar">
@@ -43,7 +44,9 @@ export default function TranscriptView({ transcriptText, setTranscriptText }: Tr
             <div className="mb-5 flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-white/5">
               <div className="flex items-center gap-2">
                 <span className="h-2 w-2 rounded-full bg-emerald-500"></span>
-                <span className="text-xs font-medium text-slate-300 uppercase tracking-wider">Raw Transcript Available</span>
+                <span className="text-xs font-medium text-slate-300 uppercase tracking-wider">
+                  {inputMode === 'pdf' ? 'Extracted PDF Available' : 'Raw Transcript Available'}
+                </span>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 {showTranscript && (
@@ -110,7 +113,7 @@ export default function TranscriptView({ transcriptText, setTranscriptText }: Tr
                       : "bg-emerald-500 text-slate-950 border-emerald-500 hover:bg-emerald-400 shadow-md shadow-emerald-500/20")
                   }
                 >
-                  {showTranscript ? "Hide text" : "Click to view full transcript"}
+                  {showTranscript ? "Hide text" : (inputMode === 'pdf' ? "Click to view full extract" : "Click to view full transcript")}
                 </button>
               </div>
             </div>
@@ -139,7 +142,7 @@ export default function TranscriptView({ transcriptText, setTranscriptText }: Tr
             ) : (
               <div className="flex flex-col items-center justify-center py-10 text-slate-500 border-2 border-dashed border-white/5 rounded-xl bg-black/10">
                 <FileText className="h-8 w-8 mb-3 opacity-20" />
-                <p className="text-sm">Transcript hidden to save space.</p>
+                <p className="text-sm">{inputMode === 'pdf' ? 'Extract' : 'Transcript'} hidden to save space.</p>
                 <p className="text-xs mt-1">Use the controls above to view or copy.</p>
               </div>
             )}
@@ -149,7 +152,7 @@ export default function TranscriptView({ transcriptText, setTranscriptText }: Tr
             <div className="h-10 w-10 rounded-full bg-slate-800/50 flex items-center justify-center mb-3">
               <FileText className="h-5 w-5 opacity-50" />
             </div>
-            <p>Transcript is empty or hasn&apos;t loaded yet.</p>
+            <p>{inputMode === 'pdf' ? 'Extracted text' : 'Transcript'} is empty or hasn&apos;t loaded yet.</p>
           </div>
         )}
       </div>

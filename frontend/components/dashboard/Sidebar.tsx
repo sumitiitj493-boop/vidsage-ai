@@ -119,7 +119,7 @@ export default function DashboardSidebar({
                 : "bg-transparent text-slate-400 hover:bg-slate-800/50 hover:text-slate-200 border border-transparent")
             }
           >
-            <span>{inputMode === "audio" ? "Audio Progress" : "Raw Transcript"}</span>
+            <span>{inputMode === "pdf" ? "Extracted Document" : inputMode === "audio" ? "Audio Progress" : "Raw Transcript"}</span>
             <div className={`w-1.5 h-1.5 rounded-full transition-colors ${activeMode === "transcript" || activeMode === "progress" ? "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]" : "bg-transparent"}`}></div>
           </button>
           <button

@@ -158,7 +158,7 @@ export default function Dashboard() {
                   <ProgressView inputMode={processor.inputMode} audioProgress={processor.audioProgress} isAudioDone={processor.isAudioDone} audioStatus={processor.audioStatus} audioElapsed={processor.audioElapsed} audioEstimated={processor.audioEstimated} setActiveMode={processor.setActiveMode} />
                 )}
                 {processor.activeMode === "transcript" && (
-                  <TranscriptView transcriptText={processor.transcriptText} setTranscriptText={processor.setTranscriptText as any} />
+                  <TranscriptView transcriptText={processor.transcriptText} setTranscriptText={processor.setTranscriptText as any} inputMode={processor.inputMode} />
                 )}
                 {processor.activeMode === "notes" && (
                   <NotesView

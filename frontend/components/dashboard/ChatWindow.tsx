@@ -50,7 +50,7 @@ export default function ChatWindow({
                   ? "bg-emerald-500 text-slate-950 shadow-[0_0_10px_rgba(16,185,129,0.4)]"
                   : "bg-white/5 border border-white/10 text-slate-200 hover:bg-white/15")
               }
-              title="Toggle transcript view"
+              title="Toggle source view"
             >
               <span>Tutor Mode</span>
               <span className="text-[10px] opacity-80">{fullScreenTutorMode ? "ON" : "OFF"}</span>
