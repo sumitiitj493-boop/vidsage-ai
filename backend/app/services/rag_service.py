@@ -53,6 +53,8 @@ IMPORTANT INSTRUCTIONS (Use for notebook-quality math notes):
 - Output must be valid LaTeX and Markdown only.
 - Use `\\text{...}` for prose inside LaTeX math segments if needed.
 - For formulas, use LaTeX math delimiters (`$...$` inline, `$$...$$` block).
+- Prefer standalone `$$...$$` blocks for any non-trivial equation or derivation.
+- Never split a single equation across multiple lines or emit unmatched dollar signs.
 - Provide section headings, bullet points, and clean structure.
 - Do NOT include raw segment tags like "Segment (0:00)" repeated.
 - Do not output Hindi or other mix-language in this mode; use English only.
@@ -229,19 +231,25 @@ IMPORTANT INSTRUCTIONS (Use for notebook-quality math notes):
         """Stream text using Groq (single chunk) or OpenRouter (live)."""
         prompt = self._messages_to_prompt(messages)
 
-        # Try Groq first
+        # Try Groq first with robust model fallback
         if self.groq_enabled and self.groq_client:
-            try:
-                response = self.groq_client.chat.completions.create(
-                    model=model, messages=messages, temperature=temperature
-                )
-                yield response.choices[0].message.content
-                return
-            except Exception as e:
-                if self._is_rate_limit_error(e):
-                    logger.warning("Groq rate limit hit; falling back to OpenRouter. (%s)", e)
-                else:
-                    logger.exception("Groq call failed; falling back to OpenRouter if available.")
+            default_groq_models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768", "gemma2-9b-it"]
+            models_to_try = [model] + [m for m in default_groq_models if m != model]
+            
+            for current_model in models_to_try:
+                try:
+                    response = self.groq_client.chat.completions.create(
+                        model=current_model, messages=messages, temperature=temperature
+                    )
+                    yield response.choices[0].message.content
+                    return
+                except Exception as e:
+                    if self._is_rate_limit_error(e):
+                        logger.warning(f"Groq rate limit hit on {current_model}; trying next. ({e})")
+                        continue
+                    else:
+                        logger.warning(f"Groq call failed on {current_model}; trying next. ({e})")
+                        continue
 
         # Final attempt: fallback to OpenRouter streaming.
         # OpenRouter uses a different model namespace than Groq (e.g. gpt-4o-mini).
@@ -681,30 +689,16 @@ IMPORTANT INSTRUCTIONS (Use for notebook-quality math notes):
         """
 
         try:
-            outline_resp = self.groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[{"role": "user", "content": outline_prompt}],
-                temperature=0.2,
-            )
-            outline_text = outline_resp.choices[0].message.content
-        except Exception as e:
-            # Detect Groq rate limit errors and raise a structured exception so the API can return a 429.
-            errmsg = str(e)
-            if "rate limit" in errmsg.lower() or "rate_limit_exceeded" in errmsg.lower():
-                import re
-
-                match = re.search(r"try again in ([0-9hms\.]+)", errmsg, re.IGNORECASE)
-                retry = match.group(1) if match else None
-                raise RateLimitError(
-                    f"Rate limit reached. Try again in {retry or 'a few minutes'}.",
-                    retry_after_seconds=None,
-                )
-            # fallback to OpenRouter for outline generation if Groq cannot respond.
+            # Use `chat_completion` instead of `groq_client.chat` to leverage the multi-model fallback loop
             outline_text = self.chat_completion(
                 messages=[{"role": "user", "content": outline_prompt}],
                 model="llama-3.3-70b-versatile",
                 temperature=0.2,
             )
+        except Exception as e:
+            # If all fallbacks fail, log the error and use a minimal fallback outline instead of crashing.
+            logger.error(f"Outline generation completely failed: {e}")
+            outline_text = '[{"section": "Generated Notes", "bullets": ["Generation partially failed due to rate limits."]}]'
 
         try:
             import json
@@ -725,7 +719,7 @@ IMPORTANT INSTRUCTIONS (Use for notebook-quality math notes):
                 "cell_type": "markdown",
                 "metadata": {},
                 "source": [
-                    "\\section*{🚀 Masterclass Notes}\n",
+                    "\\section*{🚀 \\textcolor{red}{Masterclass Notes}}\n",
                     "\\textit{Generated from transcript.}\n\n",
                 ],
             })
@@ -741,13 +735,17 @@ IMPORTANT INSTRUCTIONS (Use for notebook-quality math notes):
 
         # Outline cell
         if output_format.lower() == "latex":
-            outline_lines = ["\\subsection*{In This Lecture}\n"]
+            outline_lines = ["\\subsection*{In This Lecture}\n\\begin{tcolorbox}[colback=blue!5!white,colframe=blue!75!black,title=Lecture Outline]\n"]
             for entry in outline:
                 section_title = entry.get("section")
                 bullets = entry.get("bullets", [])
-                outline_lines.append(f"\\textbf{{{section_title}}}\\\n")
-                for b in bullets:
-                    outline_lines.append(f"\\begin{{itemize}}\\item {b}\\end{{itemize}}\n")
+                outline_lines.append(f"\\textbf{{\\textcolor{{blue}}{{{section_title}}}}}\n")
+                if bullets:
+                    outline_lines.append("\\begin{itemize}\n")
+                    for b in bullets:
+                        outline_lines.append(f"\\item \\textcolor{{green}}{{{b}}}\n")
+                    outline_lines.append("\\end{itemize}\n")
+            outline_lines.append("\\end{tcolorbox}\n")
             cells.append({
                 "cell_type": "markdown",
                 "metadata": {},
@@ -771,16 +769,13 @@ IMPORTANT INSTRUCTIONS (Use for notebook-quality math notes):
         for entry in outline:
             section_title = entry.get("section", "Untitled")
             bullets = entry.get("bullets", [])
-            if output_format.lower() == "latex":
-                section_source = [f"\\section{{{section_title}}}\n\n"]
-                for b in bullets:
-                    section_source.append(f"\\begin{{itemize}}\\item {b}\\end{{itemize}}\n")
-                section_source.append("\n")
-            else:
-                section_source = [f"## {section_title}\n\n"]
-                for b in bullets:
-                    section_source.append(f"- {b}\n")
-                section_source.append("\n")
+            
+            # STRICT Separation: Since this is a Jupyter Notebook generation, we only use Markdown.
+            section_source = [f"## {section_title}\n\n"]
+            for b in bullets:
+                section_source.append(f"- {b}\n")
+            section_source.append("\n")
+
             cells.append({
                 "cell_type": "markdown",
                 "metadata": {},
@@ -796,149 +791,99 @@ IMPORTANT INSTRUCTIONS (Use for notebook-quality math notes):
             except Exception:
                 return "0:00"
 
-        def create_note_cell(chunk_text: str, ts: str) -> dict:
-            mandatory_notes = """
-You are an expert note-taking assistant.
-For each segment:
-- Start with a 1-2 sentence summary of the main idea (use **bold** or *italics* for emphasis).
-- Then, provide 4 concise, explanatory bullets, each starting with `- `.
-- At least one bullet should use a math formula (if relevant), in `$...$` (inline) or `$$...$$` (block).
-- Use active language, highlight key insights, and avoid repetition.
-- Do not include timestamp markers in the output (timestamp shown in heading only).
-"""
+        # Grouping chunks to ensure continuous flow and avoid rigid repetitive formats
+        chunk_group_size = 5
+        grouped_chunks = []
+        for i in range(0, len(documents), chunk_group_size):
+            group_docs = documents[i:i + chunk_group_size]
+            
+            # Find the starting timestamp of this group
+            orig_idx = i
+            meta = metadatas[orig_idx] if orig_idx < len(metadatas) else {}
+            start = meta.get("start", 0)
+            ts = format_ts(start)
+            
+            combined_text = "\n\n".join(group_docs)
+            grouped_chunks.append((combined_text, ts))
 
+        def create_note_cell(chunk_text: str, ts: str, prev_context: str) -> tuple:
+            # A prompt that encourages fluid, beautifully formatted markdown or LaTeX
+            logger.info(f"Generating cell at ts={ts}, length={len(chunk_text)}")
             if output_format.lower() == "latex":
-                format_instructions = (
-                    "Use valid LaTeX: start each segment with \\section{...}, then a short summary, then an \\begin{itemize} list. "
-                    "Use $...$ or $$...$$ for math. Avoid raw markdown."
-                )
-            else:
-                format_instructions = (
-                    "Use Markdown: start with a bolded summary, then a bullet list. Use $...$ or $$...$$ for math."
-                )
+                prompt = f"""You are an elite AI educational writer generating a premium Masterclass study guide in LaTeX format.
+Continue writing comprehensive, flowing course notes based on the following transcript segment.
+Use LaTeX formatting with colors, boxes, and interactive elements to make the notes visually appealing.
 
-            prompt = f"""
-{mandatory_notes}
-{format_instructions}
+Guidelines:
+- Use \\textcolor{{blue}}{{text}} for key terms and important concepts.
+- Use \\begin{{tcolorbox}}[colback=blue!5!white,colframe=blue!75!black,title=Key Insight]
+Your insight text here.
+\\end{{tcolorbox}} for important insights or quotes.
+- Use \\begin{{tcolorbox}}[colback=green!5!white,colframe=green!75!black,title=Formula] ... \\end{{tcolorbox}} for mathematical formulas.
+- Use \\section{{}} and \\subsection{{}} for structure.
+- Use \\textbf{{}} for emphasis.
+- Use itemize or enumerate for lists.
+- Include mathematical equations with $$ or \\[ \\] delimiters.
+- Keep equations balanced and properly formatted.
+- Connect ideas logically in flowing paragraphs.
 
-Transcript chunk:
+Previous Context (pick up the flow from here):
+{prev_context[-800:] if prev_context else "This is the start of the lecture."}
+
+Transcript Segment:
 {chunk_text}
 
-REQUIRED OUTPUT:
-If LaTeX: \\section{{...}}\nSummary sentence(s)\n\\begin{{itemize}}\n\\item ...\n...\n\\end{{itemize}}
-If Markdown: **Summary sentence(s)**\n- ...\n- ...\n- ...\n- ...
-"""
+OUTPUT (LaTeX format only, no markdown):"""
+            else:
+                prompt = f"""You are an elite AI educational writer generating a premium Masterclass study guide.
+Continue writing comprehensive, flowing course notes based on the following transcript segment.
+DO NOT use repetitive structures like starting every single section with "> **Summary:**" or a bullet list.
+
+Guidelines:
+- Write fluidly, like a well-edited textbook or premium article.
+- Use Markdown headers (`### Your Creative Subheading`) to separate concepts. Let headers be creative, NOT literal labels like "Blockquotes".
+- Use **bold text** for key terms and new vocabulary.
+- Start important insights, quotes, or key formulas with a `>` character at the beginning of the line so they render as blockquotes. Do NOT write the word "Blockquote".
+- Use `- ` bullet points occasionally for lists, but rely on flowing paragraphs too.
+- If explaining Math or formulas, use `$$ formula $$` on its own line and explain its variables.
+- Keep every equation delimiter balanced. Prefer a single complete block equation over partial inline fragments.
+- Connect ideas logically.
+
+Previous Context (pick up the flow from here):
+{prev_context[-800:] if prev_context else "This is the start of the lecture."}
+
+Transcript Segment:
+{chunk_text}
+
+OUTPUT (Markdown format):"""
             try:
-                resp = self.groq_client.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
+                note = self.chat_completion(
                     messages=[{"role": "user", "content": prompt}],
-                    temperature=0.2,
-                )
-                note = resp.choices[0].message.content.strip()
-            except Exception as e:
-                errmsg = str(e)
-                if "rate limit" in errmsg.lower() or "rate_limit_exceeded" in errmsg.lower():
-                    import re
-
-                    match = re.search(r"try again in ([0-9hms\.]+)", errmsg, re.IGNORECASE)
-                    retry = match.group(1) if match else None
-                    raise RateLimitError(
-                        f"Rate limit reached. Try again in {retry or 'a few minutes'}.",
-                        retry_after_seconds=None,
-                    )
-
-                # fallback: use OpenRouter if Groq fails for note creation.
-                note = self._openrouter_generate(
-                    prompt=prompt,
-                    model=self.openrouter_model,
-                    temperature=0.2,
-                    max_tokens=256,
+                    model="llama-3.3-70b-versatile",
+                    temperature=0.3,
                 ).strip()
+            except Exception as e:
+                logger.error(f"Chunk generation failed: {e}")
+                if output_format.lower() == "latex":
+                    note = f"\\subsection*{{Segment Notes ({ts})}}\n\\begin{{tcolorbox}}[colback=red!5!white,colframe=red!75!black,title=Error]\nAI limits reached. Processing skipped for this portion.\n\\end{{tcolorbox}}"
+                else:
+                    note = f"### Segment Notes ({ts})\n> AI limits reached.\n- Processing skipped for this portion."
 
-            # Strip any accidental HTML tags, to keep output safe and Markdown-friendly.
+            # Fix newlines
             import re
-
             note = re.sub(r"<[^>]+>", "", note).strip()
             note = note.replace("\r\n", "\n").strip()
 
-            # remove redundant metadata lines produced by some models
-            note = re.sub(r"^Segment\s*\(.*\)\\n", "", note, flags=re.MULTILINE)
-            note = re.sub(r"^\s*-?\s*Timestamp\s*[:=].*", "", note, flags=re.IGNORECASE | re.MULTILINE)
-            note = note.strip()
-
-            # Advanced: Parse LLM output into subtopic, summary, bullets, formulas
-            import re
-            subtopic = ""
-            summary = ""
-            bullets = []
-            formulas = []
-            lines = [line.strip() for line in note.split("\n") if line.strip()]
-            mode = None
-            for line in lines:
-                if re.match(r"^(#+|\\\section|\\\subsection|Subtopic:|###)", line, re.IGNORECASE):
-                    subtopic = re.sub(r"^(#+|\\\section|\\\subsection|Subtopic:|###)\s*:?\s*", "", line)
-                elif line.lower().startswith("summary") or line.lower().startswith("> **summary:**"):
-                    mode = "summary"
-                    summary = re.sub(r"^.*?summary:?\s*", "", line, flags=re.IGNORECASE)
-                elif line.startswith("- "):
-                    mode = "bullets"
-                    bullets.append(line[2:].strip())
-                elif re.match(r"^(>|\\\[|\$\$|\\begin\{tcolorbox\}|\\end\{tcolorbox\}|\\\[|\\\])", line):
-                    mode = "formula"
-                    # Try to extract formula content
-                    formula = re.sub(r"^>+\s*\*\*Formula:?\*\*:?\s*", "", line)
-                    formula = formula.strip('>$ ')
-                    if formula:
-                        formulas.append(formula)
-                elif mode == "summary":
-                    summary += " " + line
-                elif mode == "bullets":
-                    if line.startswith("- "):
-                        bullets.append(line[2:].strip())
-                elif mode == "formula":
-                    formulas.append(line)
-
             if output_format.lower() == "latex":
-                content = ""
-                if subtopic:
-                    content += f"\\subsection*{{{subtopic}}}\n"
-                if summary:
-                    content += f"\\begin{{tcolorbox}}[colback=blue!5!white, colframe=blue!75!black, title=Summary]\n{summary}\n\\end{{tcolorbox}}\n"
-                if bullets:
-                    content += "\\begin{itemize}\n"
-                    for b in bullets:
-                        content += f"  \\item {b}\n"
-                    content += "\\end{itemize}\n"
-                for f in formulas:
-                    content += f"\\begin{{tcolorbox}}[colback=yellow!10!white, colframe=purple!80!black, title=Formula]\n\\[ {f} \\]\n\\end{{tcolorbox}}\n"
-                return {
-                    "cell_type": "markdown",
-                    "metadata": {},
-                    "source": [content],
-                }
-            else:
-                content = ""
-                if subtopic:
-                    content += f"### {subtopic}\n\n"
-                if summary:
-                    content += f"> **Summary:** {summary}\n\n"
-                if bullets:
-                    for b in bullets:
-                        content += f"- {b}\n"
-                    content += "\n"
-                for f in formulas:
-                    content += f"> **Formula:**\n> $$ {f} $$\n\n"
-                return {
-                    "cell_type": "markdown",
-                    "metadata": {},
-                    "source": [content],
-                }
+                return {"cell_type": "markdown", "metadata": {}, "source": [note + "\n\n"]}, note
 
-        for idx, doc in enumerate(documents):
-            meta = metadatas[idx] if idx < len(metadatas) else {}
-            start = meta.get("start", 0)
-            ts = format_ts(start)
-            cells.append(create_note_cell(doc, ts))
+            return {"cell_type": "markdown", "metadata": {}, "source": [note + "\n\n"]}, note
+
+        prev_context = ""
+        for chunk_text, ts in grouped_chunks:
+            cell, md_text = create_note_cell(chunk_text, ts, prev_context)
+            cells.append(cell)
+            prev_context += "\n\n" + md_text
 
         notebook = {
             "nbformat": 4,
