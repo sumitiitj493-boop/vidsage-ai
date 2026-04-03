@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Copy, ExternalLink } from "lucide-react";
+import { Copy, ExternalLink, Download } from "lucide-react";
 import { InputMode, ActiveMode } from "../../lib/types/dashboard";
 import { truncateMiddle } from "../../lib/utils/formatters";
 
@@ -48,6 +48,54 @@ export default function DashboardSidebar({
     }
   };
 
+  const [audioDownloadProgress, setAudioDownloadProgress] = useState<number | null>(null);
+
+  const handleAudioDownload = async () => {
+    if (audioDownloadProgress !== null) return;
+    try {
+      setAudioDownloadProgress(0);
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000"}/api/video/audio/${videoId}`);
+      if (!res.ok) throw new Error("Network error");
+      
+      const contentLength = res.headers.get("content-length");
+      const total = contentLength ? parseInt(contentLength, 10) : 0;
+      
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No reader");
+      
+      let received = 0;
+      const chunks = [];
+      
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) {
+          chunks.push(value);
+          received += value.length;
+          if (total) {
+            setAudioDownloadProgress(Math.round((received / total) * 100));
+          } else {
+            setAudioDownloadProgress(prev => prev ? Math.min(prev + 5, 95) : 5);
+          }
+        }
+      }
+      
+      const blob = new Blob(chunks, { type: "audio/mpeg" });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${videoId}_audio.mp3`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setAudioDownloadProgress(null);
+    }
+  };
+
   const displayTitle = ytDetails?.title || videoTitle || (inputMode === "youtube" ? "YouTube Video" : "Uploaded File");
   const authorName = ytDetails?.author_name || "";
 
@@ -66,9 +114,33 @@ export default function DashboardSidebar({
               className="absolute inset-0 h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-900/60 to-transparent" />
-            <a href={`https://www.youtube.com/watch?v=${videoId}`} target="_blank" rel="noopener noreferrer" className="absolute top-3 right-3 bg-black/40 hover:bg-black/60 p-2 rounded-full backdrop-blur-md transition-colors">
-              <ExternalLink className="w-4 h-4 text-white" />
-            </a>
+            <div className="absolute top-3 right-3 flex gap-2">
+              <button 
+                onClick={handleAudioDownload}
+                disabled={audioDownloadProgress !== null}
+                title="Download Audio"
+                className="relative bg-black/40 hover:bg-amber-500 hover:text-slate-950 p-2 rounded-full backdrop-blur-md transition-all group overflow-hidden"
+              >
+                {audioDownloadProgress !== null && (
+                  <div 
+                    className="absolute bottom-0 left-0 bg-amber-500/30 w-full transition-all duration-300 z-0" 
+                    style={{ height: `${audioDownloadProgress}%` }} 
+                  />
+                )}
+                <div className="relative z-10 flex items-center justify-center h-4 w-4">
+                  {audioDownloadProgress !== null ? (
+                    <span className="text-[9px] font-black text-amber-500 font-mono">
+                      {audioDownloadProgress}%
+                    </span>
+                  ) : (
+                    <Download className="w-4 h-4 text-white group-hover:text-slate-950" />
+                  )}
+                </div>
+              </button>
+              <a href={`https://www.youtube.com/watch?v=${videoId}`} target="_blank" rel="noopener noreferrer" className="bg-black/40 hover:bg-black/60 p-2 rounded-full backdrop-blur-md transition-colors" title="Open in YouTube">
+                <ExternalLink className="w-4 h-4 text-white" />
+              </a>
+            </div>
             <div className="absolute bottom-0 left-0 p-4 w-full">
                <div className="flex items-center gap-2 mb-1.5">
                   <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-red-600/90 text-white backdrop-blur-md shadow-lg">YouTube Video</span>
