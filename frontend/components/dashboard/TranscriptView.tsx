@@ -116,8 +116,25 @@ export default function TranscriptView({ transcriptText, setTranscriptText }: Tr
             </div>
 
             {showTranscript ? (
-              <div className={`max-h-[45vh] overflow-y-auto rounded-lg border border-white/5 bg-slate-900/60 p-4 leading-relaxed text-slate-300 shadow-inner custom-scrollbar ${fontFamily}`} style={{ fontSize: `${fontSize}px` }}>
-                <pre className={`whitespace-pre-wrap ${fontFamily}`} style={{ fontSize: `${fontSize}px` }}>{transcriptText}</pre>
+              <div className={`max-h-[45vh] overflow-y-auto rounded-lg border border-white/5 bg-slate-900/40 p-4 leading-relaxed text-slate-300 shadow-inner custom-scrollbar ${fontFamily}`} style={{ fontSize: `${fontSize}px` }}>
+                {transcriptText.split('\n\n').map((chunk, i) => {
+                  const match = chunk.match(/^(\[\d{1,2}:\d{2}(?::\d{2})?\])\s*([\s\S]*)$/);
+                  if (match) {
+                    return (
+                      <div key={i} className="mb-4 bg-slate-800/40 border border-white/5 rounded-xl p-4 shadow-sm hover:border-white/10 hover:bg-slate-800/60 transition-colors">
+                        <div className="text-emerald-400 font-mono text-[0.85em] mb-2 inline-block bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded shadow-sm">
+                          {match[1]}
+                        </div>
+                        <div className="whitespace-pre-wrap leading-relaxed">{match[2]}</div>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div key={i} className="mb-4 bg-slate-800/40 border border-white/5 rounded-xl p-4 shadow-sm hover:border-white/10 hover:bg-slate-800/60 transition-colors">
+                      <div className="whitespace-pre-wrap leading-relaxed">{chunk}</div>
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center py-10 text-slate-500 border-2 border-dashed border-white/5 rounded-xl bg-black/10">

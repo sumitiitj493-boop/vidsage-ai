@@ -111,8 +111,35 @@ export function useVideoProcessor() {
 
       setDownloadState({ status: "done", response: data });
 
-      const rawText = data.cleaned_text || data.raw_text ||
-        (Array.isArray(data.segments) ? data.segments.map((s: any) => s.text).join("\n") : "");
+      let rawText = "";
+      if (Array.isArray(data.segments) && data.segments.length > 0) {
+        let chunkStartTime = data.segments[0].start;
+        let currentChunk = "";
+        const chunks = [];
+        
+        for (let i = 0; i < data.segments.length; i++) {
+          const s = data.segments[i];
+          currentChunk += s.text + " ";
+          
+          if (s.end - chunkStartTime >= 45 || i === data.segments.length - 1 || currentChunk.length > 800) {
+            // Include hour if needed
+            const h = Math.floor(chunkStartTime / 3600);
+            const m = Math.floor((chunkStartTime % 3600) / 60).toString().padStart(2, '0');
+            const sec = Math.floor(chunkStartTime % 60).toString().padStart(2, '0');
+            const timeStamp = h > 0 ? `[${h}:${m}:${sec}]` : `[${m}:${sec}]`;
+            
+            chunks.push(`${timeStamp}\n${currentChunk.trim()}`);
+            
+            if (i < data.segments.length - 1) {
+              chunkStartTime = data.segments[i + 1].start;
+            }
+            currentChunk = "";
+          }
+        }
+        rawText = chunks.join("\n\n");
+      } else {
+        rawText = data.cleaned_text || data.raw_text || "";
+      }
 
       setTranscriptText(rawText);
       if (inputMode !== "audio") {

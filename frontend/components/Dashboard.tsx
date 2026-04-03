@@ -214,7 +214,7 @@ export default function Dashboard() {
       <div className={"fixed inset-0 z-[70] flex items-center justify-center bg-black/70 backdrop-blur-xl p-4 md:p-8 transition-opacity duration-300 " + (chatFullScreen ? "opacity-100" : "opacity-0 pointer-events-none")}>
         <div className={"flex overflow-hidden rounded-[2rem] bg-slate-900 border border-white/5 shadow-2xl w-full max-w-7xl h-[90vh] transition-transform duration-300 transform " + (chatFullScreen ? "scale-100" : "scale-[0.98]")}>
           
-          {fullScreenTutorMode && (
+          {fullScreenTutorMode && processor.inputMode !== 'pdf' && (
             <div className="w-[45%] border-r border-white/5 p-8 overflow-y-auto bg-slate-950/40">
               <h3 className="text-xl font-bold tracking-tight text-white mb-6 border-b border-white/5 pb-4">Source Material</h3>
               <div className="prose prose-invert max-w-none text-slate-300">
@@ -223,14 +223,14 @@ export default function Dashboard() {
             </div>
           )}
 
-          <div className={`${fullScreenTutorMode ? "w-[55%]" : "w-full"} p-0`}>
+          <div className={`${fullScreenTutorMode && processor.inputMode !== 'pdf' ? "w-[55%]" : "w-full"} p-0`}>
             <ChatWindow
               title="Sage Assistant (Focus Mode)" subtitle="" isFullScreen={true} onToggleFullScreen={() => setChatFullScreen(false)}
               chatHistory={chat.chatHistory} chatIndex={chat.chatIndex} chatQuestion={chat.chatQuestion}
               setChatQuestion={chat.setChatQuestion} chatLoading={chat.chatLoading} askQuestion={chat.askQuestion}
               clearChatHistory={chat.clearChatHistory} suggestedQuestions={processor.suggestedQuestions}
               renderMarkdownAnswer={renderMarkdownAnswer} renderLatexAnswer={renderLatexAnswer} chatContainerRef={chat.chatContainerRef}
-              fullScreenTutorMode={fullScreenTutorMode} onToggleTutorMode={() => setFullScreenTutorMode(p => !p)}
+              fullScreenTutorMode={fullScreenTutorMode} onToggleTutorMode={processor.inputMode === 'pdf' ? undefined : () => setFullScreenTutorMode(p => !p)}
               chatLanguage={chat.chatLanguage} setChatLanguage={chat.setChatLanguage}
             />
           </div>
