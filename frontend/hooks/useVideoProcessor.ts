@@ -39,14 +39,55 @@ export function useVideoProcessor() {
         const result = await fetch(`${apiBase}/api/audio/result/${jobId}`);
         const rl = await result.json();
         if (rl.status === "completed") {
-          setDownloadState({ status: "done", response: rl.result });
+          const theData = rl.result;
+          theData.video_id = jobId;
+          setDownloadState({ status: "done", response: theData });
+          
+          let rawText = "";
+          if (Array.isArray(theData.segments) && theData.segments.length > 0) {
+            let chunkStartTime = theData.segments[0].start;
+            let currentChunk = "";
+            const chunks = [];
+
+            for (let i = 0; i < theData.segments.length; i++) {
+              const s = theData.segments[i];
+              currentChunk += s.text + " ";
+              if (s.end - chunkStartTime >= 45 || i === theData.segments.length - 1 || currentChunk.length > 800) {
+                const h = Math.floor(chunkStartTime / 3600);
+                const m = Math.floor((chunkStartTime % 3600) / 60).toString().padStart(2, '0');
+                const sec = Math.floor(chunkStartTime % 60).toString().padStart(2, '0');
+                const timeStamp = h > 0 ? `[${h}:${m}:${sec}]` : `[${m}:${sec}]`;
+                chunks.push(`${timeStamp}\n${currentChunk.trim()}`);
+                if (i < theData.segments.length - 1) chunkStartTime = theData.segments[i + 1].start;
+                currentChunk = "";
+              }
+            }
+            rawText = chunks.join("\n\n");
+          } else {
+            rawText = theData.cleaned_text || theData.raw_text || "";
+          }
+          setTranscriptText(rawText);
           setStage("ready");
+
+          try {
+            const suggRes = await fetch(`${apiBase}/api/chat/suggest/${jobId}`);
+            if (suggRes.ok) {
+              const suggData = await suggRes.json();
+              if (Array.isArray(suggData.questions)) {
+                setSuggestedQuestions(suggData.questions);
+              }
+            }
+          } catch {
+            // ignore
+          }
+          setActiveMode("transcript");
         }
         return;
       }
 
       if (data.status && data.status !== "completed" && data.status !== "failed") {
-        setTimeout(() => pollAudioStatus(jobId), 2500);
+        // Poll every 5 seconds to reduce backend log spam
+        setTimeout(() => pollAudioStatus(jobId), 5000);
       }
     } catch {
       // ignore
@@ -92,6 +133,9 @@ export function useVideoProcessor() {
         if (!audioFile) throw new Error("Select an audio file first.");
         const form = new FormData();
         form.append("file", audioFile);
+        if (opts.forceWhisper) {
+          form.append("force_whisper", "true");
+        }
         const res = await fetch(`${apiBase}/api/audio/upload`, {
           method: "POST",
           body: form,
@@ -105,14 +149,16 @@ export function useVideoProcessor() {
         setAudioElapsed(0);
         setAudioEstimated(null);
         setActiveMode("progress");
-        data = { video_id: result.job_id, source: "audio_upload" };
+        data = { video_id: result.job_id, source: opts.forceWhisper ? "audio_enhanced" : "audio_upload" };
         pollAudioStatus(result.job_id);
       }
 
       setDownloadState({ status: "done", response: data });
 
       let rawText = "";
-      if (Array.isArray(data.segments) && data.segments.length > 0) {
+      if (inputMode === "pdf") {
+        rawText = data.raw_text || data.cleaned_text || "";
+      } else if (Array.isArray(data.segments) && data.segments.length > 0) {
         let chunkStartTime = data.segments[0].start;
         let currentChunk = "";
         const chunks = [];

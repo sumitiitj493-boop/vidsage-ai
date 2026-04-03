@@ -77,7 +77,11 @@ export function useChat(videoId: string | undefined | null, videoTitle?: string)
   }, [chatHistory, videoId, videoTitle]);
 
   const askQuestion = async (question: string) => {
-    if (!videoId || !question.trim()) return;
+    if (!videoId) {
+        alert("The Chat module didn't receive the processing job ID. Upload might have cleared it.");
+        return;
+    }
+    if (!question.trim()) return;
     setChatLoading(true);
     setChatAnswer("");
 
@@ -129,7 +133,15 @@ export function useChat(videoId: string | undefined | null, videoTitle?: string)
       setChatIndex((prev) => prev + 1);
       setChatQuestion("");
     } catch (err) {
-      setChatAnswer(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      setChatAnswer(`Error: ${errMsg}`);
+      setChatHistory((prev) => {
+        const next = prev.slice(0, chatIndex + 1);
+        next.push({ question, answer: `Error: ${errMsg}`, format: chatOutputMode });
+        return next;
+      });
+      setChatIndex((prev) => prev + 1);
+      setChatQuestion("");
     } finally {
       setChatLoading(false);
     }

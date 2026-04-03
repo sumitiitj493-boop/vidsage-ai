@@ -1,15 +1,27 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Copy, ZoomIn, ZoomOut, Type, FileText } from "lucide-react";
 
 interface TranscriptViewProps {
   transcriptText: string;
   setTranscriptText: (text: string) => void;
   inputMode?: string;
+  pdfFile?: File | null;
 }
 
-export default function TranscriptView({ transcriptText, setTranscriptText, inputMode }: TranscriptViewProps) {
+export default function TranscriptView({ transcriptText, setTranscriptText, inputMode, pdfFile }: TranscriptViewProps) {
   const [showTranscript, setShowTranscript] = useState(false);
   const [copyHint, setCopyHint] = useState("");
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (inputMode === 'pdf' && pdfFile) {
+      const url = window.URL.createObjectURL(pdfFile);
+      setPdfUrl(url);
+      return () => window.URL.revokeObjectURL(url);
+    } else {
+      setPdfUrl(null);
+    }
+  }, [inputMode, pdfFile]);
   
   // Text formatting state
   const [fontSize, setFontSize] = useState(15);
@@ -33,19 +45,28 @@ export default function TranscriptView({ transcriptText, setTranscriptText, inpu
   };
 
   return (
-    <main className="rounded-2xl border border-white/10 bg-slate-900/50 p-6 backdrop-blur-2xl shadow-xl shadow-black/30">
+    <main className="rounded-2xl border border-white/10 bg-slate-900/50 p-6 backdrop-blur-2xl shadow-xl shadow-black/30 w-full h-full flex flex-col">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-semibold text-white">{inputMode === 'pdf' ? 'Extracted Report' : 'Transcript'}</h2>
+        <h2 className="text-xl font-semibold text-white">{inputMode === 'pdf' ? 'Original Document' : 'Transcript'}</h2>
       </div>
 
-      <div className="max-h-[60vh] overflow-y-auto rounded-xl border border-white/10 bg-slate-950/40 p-5 text-sm text-slate-200 custom-scrollbar">
-        {transcriptText ? (
+      <div className="flex-1 overflow-y-auto rounded-xl border border-white/10 bg-slate-950/40 p-5 text-sm text-slate-200 custom-scrollbar relative min-h-[50vh]">
+        {inputMode === 'pdf' ? (
+          pdfUrl ? (
+            <iframe src={pdfUrl} className="w-full h-full min-h-[50vh] rounded-md bg-white/5" title="Uploaded PDF" />
+          ) : (
+            <div className="flex flex-col items-center justify-center py-10 text-slate-500 h-full">
+              <FileText className="h-10 w-10 mb-3 opacity-20" />
+              <p>No PDF file selected or available yet.</p>
+            </div>
+          )
+        ) : transcriptText ? (
           <>
             <div className="mb-5 flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-white/5">
               <div className="flex items-center gap-2">
                 <span className="h-2 w-2 rounded-full bg-emerald-500"></span>
                 <span className="text-xs font-medium text-slate-300 uppercase tracking-wider">
-                  {inputMode === 'pdf' ? 'Extracted PDF Available' : 'Raw Transcript Available'}
+                  Raw Transcript Available
                 </span>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -113,7 +134,7 @@ export default function TranscriptView({ transcriptText, setTranscriptText, inpu
                       : "bg-emerald-500 text-slate-950 border-emerald-500 hover:bg-emerald-400 shadow-md shadow-emerald-500/20")
                   }
                 >
-                  {showTranscript ? "Hide text" : (inputMode === 'pdf' ? "Click to view full extract" : "Click to view full transcript")}
+                  {showTranscript ? "Hide text" : "Click to view full transcript"}
                 </button>
               </div>
             </div>
@@ -142,17 +163,17 @@ export default function TranscriptView({ transcriptText, setTranscriptText, inpu
             ) : (
               <div className="flex flex-col items-center justify-center py-10 text-slate-500 border-2 border-dashed border-white/5 rounded-xl bg-black/10">
                 <FileText className="h-8 w-8 mb-3 opacity-20" />
-                <p className="text-sm">{inputMode === 'pdf' ? 'Extract' : 'Transcript'} hidden to save space.</p>
+                <p className="text-sm">Transcript hidden to save space.</p>
                 <p className="text-xs mt-1">Use the controls above to view or copy.</p>
               </div>
             )}
           </>
         ) : (
-          <div className="py-8 text-center text-slate-500 flex flex-col items-center">
+          <div className="py-8 text-center text-slate-500 flex flex-col items-center justify-center h-full">
             <div className="h-10 w-10 rounded-full bg-slate-800/50 flex items-center justify-center mb-3">
               <FileText className="h-5 w-5 opacity-50" />
             </div>
-            <p>{inputMode === 'pdf' ? 'Extracted text' : 'Transcript'} is empty or hasn&apos;t loaded yet.</p>
+            <p>Transcript is empty or hasn&apos;t loaded yet.</p>
           </div>
         )}
       </div>

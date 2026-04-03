@@ -92,16 +92,18 @@ export default function DashboardSidebar({
            </div>
         )}
         
-        {source === "youtube_auto" && (
-          <div className="p-4 bg-amber-950/20 border-t border-amber-500/10">
-            <p className="text-[11px] leading-relaxed text-amber-200/90 tracking-wide text-center">Using auto-generated transcript.</p>
+        {(source === "youtube_auto" || source === "audio_upload") && (
+          <div className="p-4 bg-amber-950/20 border-t border-amber-500/10"> 
+            <p className="text-[11px] leading-relaxed text-amber-200/90 tracking-wide text-center">
+              {source === "audio_upload" ? "Standard fast transcription applied." : "Using auto-generated transcript."}
+            </p>
             <button
               type="button"
               onClick={handleForceWhisper}
               disabled={isProcessing}
               className="mt-3 w-full rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 px-3 py-2 text-xs font-bold text-black hover:from-amber-400 hover:to-orange-400 disabled:opacity-50 transition-all shadow-lg shadow-amber-500/20"
             >
-              {isProcessing ? "Processing..." : "Force Whisper AI"}
+              {isProcessing ? "Processing..." : (source === "audio_upload" ? "Force High-Accuracy AI" : "Force Whisper AI")}
             </button>
           </div>
         )}
