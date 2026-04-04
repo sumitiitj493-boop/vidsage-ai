@@ -5,7 +5,7 @@ Handles audio file uploads and transcription jobs.
 Flow: Upload file -> get job_id -> poll status -> fetch result
 """
 
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks, Form
 from datetime import datetime
 from app.services.audio_uploader import audio_uploader_service
 # from app.services.transcription_service import TranscriptionService # Removed
@@ -25,7 +25,9 @@ router = APIRouter(
 
 @router.post("/upload")
 async def upload_and_start_transcription(
-    file: UploadFile = File(..., description="Audio file to upload")
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(..., description="Audio file to upload"),
+    force_whisper: bool = Form(False, description="Flag to use high-accuracy/noise-reduction transcription")
 ):
     """
     Saves the uploaded file, creates a job, and starts transcription in the background.
@@ -44,9 +46,9 @@ async def upload_and_start_transcription(
         job_manager.fail_job(job_id, str(e))
         raise HTTPException(status_code=400, detail=str(e))
 
-    # push to Celery queue so workers handle it
-    from app.tasks.transcription_tasks import process_audio_job
-    process_audio_job.delay(job_id, upload_result.file_path)
+    # Use BackgroundTasks instead of Celery queue so they run locally seamlessly
+    from app.tasks.transcription_tasks import _perform_job
+    background_tasks.add_task(_perform_job, job_id, upload_result.file_path, force_whisper)
 
     return {
         "success": True,

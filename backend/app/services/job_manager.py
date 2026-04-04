@@ -26,7 +26,8 @@ except ImportError:  # pragma: no cover
 
 class JobManager:
     def __init__(self):
-        self._use_redis = redis is not None
+        # We use BackgroundTasks instead of Celery now, so in-memory store in the fastAPI process is completely fine!
+        self._use_redis = False
         if self._use_redis:
             # use Redis so both the API server and Celery workers see the same data
             self.redis = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)

@@ -1,6 +1,8 @@
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 from urllib.parse import urlparse, parse_qs,unquote
 import logging
+from pathlib import Path
 import time
 
 from app.models.video_models import VideoRequest
@@ -55,6 +57,36 @@ def extract_video_id(url: str):
 
     except Exception:
         return None
+
+@router.get("/audio/{video_id}")
+async def get_youtube_audio(video_id: str):
+    """
+    Downloads ONLY the audio for a given YouTube video ID.
+    Returns the file as a downloadable attachment.
+    """
+    downloader = VideoDownloaderService()
+    
+    # Check if we already have it
+    expected_path = downloader.download_dir / f"{video_id}.mp3"
+    
+    if not expected_path.exists():
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        try:
+            # We must await the download_audio
+            download_result = await downloader.download_audio(
+                url=url,
+                output_format="mp3",
+                quality="192"
+            )
+            expected_path = Path(download_result["file_path"])
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Failed to download audio: {str(e)}")
+            
+    return FileResponse(
+        path=expected_path,
+        media_type="audio/mpeg",
+        filename=f"{video_id}_audio.mp3"
+    )
 
 @router.post("/download")
 async def download_video(request: VideoRequest):

@@ -32,10 +32,21 @@ class TranscriptionService:
         compute_type: str = "int8"
     ):
         logger.info(f"Loading Faster-Whisper model: {model_size}")
+        import multiprocessing
+        
+        import os
+        os.environ["OMP_NUM_THREADS"] = str(max(1, multiprocessing.cpu_count() // 2))
+
+        threads = max(1, multiprocessing.cpu_count())
+        # Use more workers to parallel-process VAD segments (MASSIVE CPU BOOST)
+        workers = max(2, multiprocessing.cpu_count() // 2) 
+        
         self.model = WhisperModel(
             model_size,
             device=device,
-            compute_type=compute_type
+            compute_type=compute_type,
+            cpu_threads=threads,
+            num_workers=workers
         )
         self.model_size = model_size
         logger.info("Model loaded successfully!")
@@ -58,7 +69,8 @@ class TranscriptionService:
         language: Optional[str] = None,
         progress_callback=None,
         english_only: bool = False,
-        translate_to_english: bool = False
+        translate_to_english: bool = False,
+        force_accuracy: bool = False
     ) -> TranscriptionResult:
 
         path = Path(audio_path)
@@ -67,18 +79,21 @@ class TranscriptionService:
             raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
         # Debug: Indicate start of transcription loop
-        print(f"[DEBUG] Starting transcription loop for: {audio_path}", flush=True)
+        print(f"[DEBUG] Starting transcription loop for: {audio_path} (High Accuracy: {force_accuracy})", flush=True)
 
         segments_generator, info = self.model.transcribe(
             str(audio_path),
             language=language,
-            vad_filter=True
+            vad_filter=True,
+            vad_parameters=dict(min_silence_duration_ms=2000 if force_accuracy else 500),
+            beam_size=5 if force_accuracy else 1, # Use beam search for higher accuracy when forced
+            condition_on_previous_text=force_accuracy # Maintain context for better accuracy when forced
         )
 
         segments = []
         full_text = []
 
-        # Estimate total duration for progress (fallback to 0 if not available)
+        # Estimate total duration for progress (fallback to 0 if not available) 
         total_duration = getattr(info, 'duration', 0) or 0
         last_percent = -1
 

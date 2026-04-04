@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Copy, ExternalLink, Download } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Copy, ExternalLink, Download, Play, Pause } from "lucide-react";
 import { InputMode, ActiveMode } from "../../lib/types/dashboard";
 import { truncateMiddle } from "../../lib/utils/formatters";
 
@@ -23,6 +23,11 @@ export default function DashboardSidebar({
 }: SidebarProps) {
   const [copyHint, setCopyHint] = useState("");
   const [ytDetails, setYtDetails] = useState<{ title: string; author_name: string } | null>(null);
+  
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
 
   useEffect(() => {
     if (inputMode === "youtube" && videoId) {
@@ -48,51 +53,38 @@ export default function DashboardSidebar({
     }
   };
 
-  const [audioDownloadProgress, setAudioDownloadProgress] = useState<number | null>(null);
+  const [isDownloadingAudio, setIsDownloadingAudio] = useState(false);
+  const [audioBlobUrl, setAudioBlobUrl] = useState<string | null>(null);
 
   const handleAudioDownload = async () => {
-    if (audioDownloadProgress !== null) return;
+    if (isDownloadingAudio) return;
     try {
-      setAudioDownloadProgress(0);
+      setIsDownloadingAudio(true);
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000"}/api/video/audio/${videoId}`);
       if (!res.ok) throw new Error("Network error");
-      
-      const contentLength = res.headers.get("content-length");
-      const total = contentLength ? parseInt(contentLength, 10) : 0;
-      
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("No reader");
-      
-      let received = 0;
-      const chunks = [];
-      
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (value) {
-          chunks.push(value);
-          received += value.length;
-          if (total) {
-            setAudioDownloadProgress(Math.round((received / total) * 100));
-          } else {
-            setAudioDownloadProgress(prev => prev ? Math.min(prev + 5, 95) : 5);
-          }
-        }
-      }
-      
-      const blob = new Blob(chunks, { type: "audio/mpeg" });
+
+      const blob = await res.blob();
       const url = window.URL.createObjectURL(blob);
+      setAudioBlobUrl(url);
+
       const a = document.createElement("a");
       a.href = url;
       a.download = `${videoId}_audio.mp3`;
       document.body.appendChild(a);
       a.click();
       a.remove();
-      window.URL.revokeObjectURL(url);
+
+      setTimeout(() => {
+        if (audioRef.current) {
+          audioRef.current.play();
+          setIsPlaying(true);
+        }
+      }, 500);
+
     } catch (e) {
       console.error(e);
     } finally {
-      setAudioDownloadProgress(null);
+      setIsDownloadingAudio(false);
     }
   };
 
@@ -105,8 +97,19 @@ export default function DashboardSidebar({
       <div className="rounded-3xl border border-white/10 bg-slate-900/50 backdrop-blur-3xl shadow-2xl shadow-black/50 overflow-hidden flex-shrink-0 relative group">
         {inputMode === "youtube" ? (
           <div className="relative aspect-video w-full bg-slate-800">
+            {audioBlobUrl && (
+              <audio
+                ref={audioRef}
+                src={audioBlobUrl}
+                onPlay={() => setIsPlaying(true)}
+                onPause={() => setIsPlaying(false)}
+                onEnded={() => setIsPlaying(false)}
+                onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+                onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+              />
+            )}
             <img
-              src={`https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`}
+              src={`https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`}   
               onError={(e) => {
                  (e.currentTarget as HTMLImageElement).src = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
               }}
@@ -115,23 +118,26 @@ export default function DashboardSidebar({
             />
             <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-900/60 to-transparent" />
             <div className="absolute top-3 right-3 flex gap-2">
-              <button 
-                onClick={handleAudioDownload}
-                disabled={audioDownloadProgress !== null}
-                title="Download Audio"
-                className="relative bg-black/40 hover:bg-amber-500 hover:text-slate-950 p-2 rounded-full backdrop-blur-md transition-all group overflow-hidden"
+              <button
+                onClick={() => {
+                  if (audioBlobUrl) {
+                    if (audioRef.current) {
+                      if (isPlaying) audioRef.current.pause();
+                      else audioRef.current.play();
+                    }
+                  } else {
+                    handleAudioDownload();
+                  }
+                }}
+                disabled={isDownloadingAudio}
+                title={audioBlobUrl ? (isPlaying ? "Pause Audio" : "Play Audio") : "Download & Play Audio"}
+                className={`relative bg-black/40 hover:bg-amber-500 hover:text-slate-950 p-2 rounded-full backdrop-blur-md transition-all group overflow-hidden ${audioBlobUrl && isPlaying ? "bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.5)]" : ""}`}
               >
-                {audioDownloadProgress !== null && (
-                  <div 
-                    className="absolute bottom-0 left-0 bg-amber-500/30 w-full transition-all duration-300 z-0" 
-                    style={{ height: `${audioDownloadProgress}%` }} 
-                  />
-                )}
                 <div className="relative z-10 flex items-center justify-center h-4 w-4">
-                  {audioDownloadProgress !== null ? (
-                    <span className="text-[9px] font-black text-amber-500 font-mono">
-                      {audioDownloadProgress}%
-                    </span>
+                  {isDownloadingAudio ? (
+                    <div className="h-3 w-3 border-[2px] border-amber-500 border-t-transparent rounded-full animate-spin"></div>
+                  ) : audioBlobUrl ? (
+                    isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 text-white group-hover:text-slate-950" />
                   ) : (
                     <Download className="w-4 h-4 text-white group-hover:text-slate-950" />
                   )}
@@ -148,6 +154,7 @@ export default function DashboardSidebar({
                </div>
                <h3 className="text-[15px] leading-tight font-bold text-white line-clamp-2 drop-shadow-[0_2px_2px_rgba(0,0,0,0.8)]" title={displayTitle}>{displayTitle}</h3>
             </div>
+            
           </div>
         ) : (
           <div className="p-5">

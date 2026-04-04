@@ -2,16 +2,18 @@ import tempfile
 import subprocess
 
 
-def preprocess_audio(input_path: str) -> str:
+def preprocess_audio(input_path: str, enhance_audio: bool = False) -> str:
     """
     Preprocess audio for Whisper ASR:
     1. Convert to mono, 16kHz, 16-bit WAV
-    2. Normalize loudness
+    2. Normalize loudness + optional denoise
     Returns path to preprocessed file.
     """
     print("[Preprocessing] Converting audio to mono 16kHz WAV...", flush=True)
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:       
         output_path = tmp.name
+
+    audio_filter = "afftdn,loudnorm" if enhance_audio else "loudnorm"
 
     ffmpeg_cmd = [
         "ffmpeg",
@@ -20,7 +22,7 @@ def preprocess_audio(input_path: str) -> str:
         "-ac", "1",
         "-ar", "16000",
         "-sample_fmt", "s16",
-        "-af", "loudnorm",
+        "-af", audio_filter,
         output_path,
     ]
 

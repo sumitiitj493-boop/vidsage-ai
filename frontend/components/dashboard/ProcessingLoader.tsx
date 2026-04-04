@@ -71,18 +71,15 @@ export default function ProcessingLoader({
   if (inputMode === "youtube") {
     steps = [
       { label: "Extracting YouTube metadata URL...", start: 0, done: s > 1.5, forceDone: false },
-      { label: "Checking availability of manual YouTube transcript...", start: 1.5, done: s > 2.8, forceDone: false },
-      { label: "Validating transcript topic consistency (AI Check)...", start: 2.8, done: s > 4.5, forceDone: false },
+      { label: "Fetching and analyzing video transcripts...", start: 1.5, done: s > 3.0, forceDone: false },
+      { label: "Validating content and organizing topics...", start: 3.0, done: s > 5.0, forceDone: false },
     ];
-    
-    // If it takes longer than 4.5s, we definitively know it's falling back to Whisper!
-    if (s > 4.5) {
-      steps.push({ label: "Transcription unavailable or failed validation.", start: 4.5, done: true, forceDone: true, error: true });
-      steps.push({ label: "Falling back to Whisper AI. Downloading stream...", start: 5.5, done: s > 8.0, forceDone: false });
-      if (s > 8.0) {
-        steps.push({ label: "Running Whisper AI (Local GPU/CPU processing).", start: 8.0, done: false, forceDone: false });
-        steps.push({ label: "Generating high-accuracy transcripts from audio. Please wait...", start: 9.5, done: false, forceDone: false, isSub: true });
-      }
+
+    if (s > 5.0) {
+      steps.push({ label: "Structuring semantic knowledge graph...", start: 5.0, done: s > 8.0, forceDone: false });
+    }
+    if (s > 8.0) {
+      steps.push({ label: "Finalizing context mapping. Please wait...", start: 8.0, done: false, forceDone: false });
     }
   } else {
     // PDF Mode

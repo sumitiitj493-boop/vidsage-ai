@@ -9,13 +9,14 @@ class ChatRequest(BaseModel):
     video_id: str
     question: str
     format: str = "markdown"  # markdown | latex
+    language: str = "auto"
 
 @router.post("/ask")
 def ask_video(request: ChatRequest):
     """
     Ask a question about a specific processed video.
     """
-    answer = rag_service.answer_question(request.video_id, request.question, output_format=request.format)
+    answer = rag_service.answer_question(request.video_id, request.question, output_format=request.format, language=request.language)
     return {"answer": answer}
 
 
@@ -24,7 +25,7 @@ def ask_video_stream(request: ChatRequest):
     """Stream the answer text as it is generated."""
 
     def stream_generator():
-        for chunk in rag_service.answer_question_stream(request.video_id, request.question):
+        for chunk in rag_service.answer_question_stream(request.video_id, request.question, request.language):
             yield chunk
 
     return StreamingResponse(stream_generator(), media_type="text/plain")

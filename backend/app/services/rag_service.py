@@ -356,7 +356,7 @@ IMPORTANT INSTRUCTIONS (Use for notebook-quality math notes):
         except:
             return "0:00"
 
-    def answer_question(self, video_id: str, question: str, output_format: str = "markdown") -> str:
+    def answer_question(self, video_id: str, question: str, output_format: str = "markdown", language: str = "auto") -> str:
         """
         EXAM MODE: Retrieves context and answers the question.
         Returns the answer or an error message.
@@ -385,16 +385,23 @@ IMPORTANT INSTRUCTIONS (Use for notebook-quality math notes):
             if not docs:
                 return "No relevant context found in this video."
 
-            # Format context WITH TIMESTAMPS
+            is_pdf = video_id.startswith("pdf_")
+
+            # Format context
             context_pieces = []
             has_valid_timestamps = False
+            has_page_numbers = False
             for i, doc in enumerate(docs):
                 meta = metas[i] if i < len(metas) else {}
                 start = meta.get('start', 0)
                 end = meta.get('end', 0)
                 
+                # Check if it's a PDF
+                if is_pdf:
+                    has_page_numbers = True
+                    context_pieces.append(f"[Page: {int(start)}]\n{doc}")
                 # Check if this is a dummy timestamp (0,0) from text input
-                if start > 0 or end > 0:
+                elif start > 0 or end > 0:
                     has_valid_timestamps = True
                     start_str = self._format_timestamp(start)
                     end_str = self._format_timestamp(end)
@@ -406,23 +413,42 @@ IMPORTANT INSTRUCTIONS (Use for notebook-quality math notes):
             context = "\n\n".join(context_pieces)
             
             # Dynamic Citation Rule based on content type
-            citation_rule = """
+            if is_pdf and has_page_numbers:
+                citation_rule = """
+            5. CITATIONS (CRITICAL):
+               - You MUST cite the page number for key facts IF they are available in context.
+               - Format: (Page: X)
+               - Example: "The CPU fetches instructions (Page: 2)..."
+                """
+            elif has_valid_timestamps:
+                citation_rule = """
             5. CITATIONS (CRITICAL):
                - You MUST cite the timestamp for key facts IF they are available in context.
                - Format: (MM:SS-MM:SS)
                - Example: "The CPU fetches instructions (02:30-02:45)..."
-            """ if has_valid_timestamps else ""
+                """
+            else:
+                citation_rule = ""
+
+            if language.lower() == "hindi":
+                lang_instruction = "You MUST answer strictly in Hindi (Devanagari script), regardless of the language the user asked in."
+            elif language.lower() == "hinglish":
+                lang_instruction = "You MUST answer strictly in Hinglish (WhatsApp style Hindi written in English alphabet), regardless of the language the user asked in."
+            elif language.lower() == "english":
+                lang_instruction = "You MUST answer strictly in professional English, regardless of the language the user asked in."
+            else:
+                lang_instruction = """- **DETECT** the language of the STUDENT QUESTION (English, Hindi, or Hinglish/Romanized Hindi).
+            - **ANSWER** in the SAME language and style.
+              - If the user asks in Hindi (Devanagari), answer in Hindi (Devanagari).
+              - If the user asks in "Hinglish" (WhatsApp style like 'ye kaise hua'), answer in Hinglish.
+              - If the user asks in professional English, answer in professional English."""
 
             # 2. Augmentation (Create Prompt)
             prompt = f"""
             You are an expert AI Tutor. Your goal is to explain concepts clearly using the provided context segments.
 
             CRITICAL INSTRUCTION - LANGUAGE & STYLE:
-            - **DETECT** the language of the STUDENT QUESTION (English, Hindi, or Hinglish/Romanized Hindi).
-            - **ANSWER** in the SAME language and style.
-              - If the user asks in Hindi, answer in Hindi.
-              - If the user asks in "Hinglish" (WhatsApp style), answer in Hinglish.
-              - If the user asks in English, answer in English.
+            {lang_instruction}
             
             CRITICAL INSTRUCTION - HANDLING ERRORS:
             1. **Transcript Errors**: The transcript is imperfect (e.g., "one new man" -> "Von Neumann"). mentally correct these errors.
@@ -435,9 +461,7 @@ IMPORTANT INSTRUCTIONS (Use for notebook-quality math notes):
             2. If the answer is not in the context, do NOT hallucinate. State that the topic is not found.
             3. VISUALIZATION:
                - Provide an ASCII diagram ONLY for complex data structures.
-            4. EXPLANATION:
-               - Explain algorithms step-by-step.
-               - Be detailed and comprehensive.
+            4. EXPLANATION:\n               - Explain algorithms step-by-step.\n               - Be detailed and comprehensive.\n            5. MATHEMATICS (CRITICAL):\n               - ALL mathematical formulas, variables, equations, and Greek letters MUST be formatted in LaTeX mode.\n               - Wrap ALL inline math in single dollar signs (e.g. \\(a, b, \\\\alpha)\\\$).\n               - Wrap ALL block/standalone equations in double dollar signs (e.g. \\$\\\^T x_p + b = 0\\$\\\$).\n               - NEVER output plain text math formulas.
             {citation_rule}
 
             CONTEXT:
@@ -467,7 +491,7 @@ IMPORTANT INSTRUCTIONS (Use for notebook-quality math notes):
             logger.error(f"Error answering question for video {video_id}: {str(e)}")
             return f"Error occurred while generating answer: {str(e)}"
 
-    def answer_question_stream(self, video_id: str, question: str) -> Generator[str, None, None]:
+    def answer_question_stream(self, video_id: str, question: str, language: str = "auto") -> Generator[str, None, None]:
         """Stream the answer text as it is generated."""
         try:
             collection_name = f"video_{video_id}"
@@ -492,15 +516,22 @@ IMPORTANT INSTRUCTIONS (Use for notebook-quality math notes):
                 yield "No relevant context found in this video."
                 return
 
-            # Format context WITH TIMESTAMPS
+            is_pdf = video_id.startswith("pdf_")
+            
+            # Format context
             context_pieces = []
             has_valid_timestamps = False
+            has_page_numbers = False
+            
             for i, doc in enumerate(docs):
                 meta = metas[i] if i < len(metas) else {}
                 start = meta.get("start", 0)
                 end = meta.get("end", 0)
 
-                if start > 0 or end > 0:
+                if is_pdf:
+                    has_page_numbers = True
+                    context_pieces.append(f"[Page: {int(start)}]\n{doc}")
+                elif start > 0 or end > 0:
                     has_valid_timestamps = True
                     start_str = self._format_timestamp(start)
                     end_str = self._format_timestamp(end)
@@ -510,22 +541,41 @@ IMPORTANT INSTRUCTIONS (Use for notebook-quality math notes):
 
             context = "\n\n".join(context_pieces)
 
-            citation_rule = """
+            if language.lower() == "hindi":
+                lang_instruction = "You MUST answer strictly in Hindi (Devanagari script), regardless of the language the user asked in."
+            elif language.lower() == "hinglish":
+                lang_instruction = "You MUST answer strictly in Hinglish (WhatsApp style Hindi written in English alphabet), regardless of the language the user asked in."
+            elif language.lower() == "english":
+                lang_instruction = "You MUST answer strictly in professional English, regardless of the language the user asked in."
+            else:
+                lang_instruction = """- **DETECT** the language of the STUDENT QUESTION (English, Hindi, or Hinglish/Romanized Hindi).
+            - **ANSWER** in the SAME language and style.
+              - If the user asks in Hindi (Devanagari), answer in Hindi (Devanagari).
+              - If the user asks in "Hinglish" (WhatsApp style like 'ye kaise hua'), answer in Hinglish.
+              - If the user asks in professional English, answer in professional English."""
+
+            if is_pdf and has_page_numbers:
+                citation_rule = """
+            5. CITATIONS (CRITICAL):
+               - You MUST cite the page number for key facts IF they are available in context.
+               - Format: (Page: X)
+               - Example: \"The CPU fetches instructions (Page: 2)...\"
+            """
+            elif has_valid_timestamps:
+                citation_rule = """
             5. CITATIONS (CRITICAL):
                - You MUST cite the timestamp for key facts IF they are available in context.
                - Format: (MM:SS-MM:SS)
                - Example: \"The CPU fetches instructions (02:30-02:45)...\"
-            """ if has_valid_timestamps else ""
+            """
+            else:
+                citation_rule = ""
 
             prompt = f"""
             You are an expert AI Tutor. Your goal is to explain concepts clearly using the provided context segments.
 
             CRITICAL INSTRUCTION - LANGUAGE & STYLE:
-            - **DETECT** the language of the STUDENT QUESTION (English, Hindi, or Hinglish/Romanized Hindi).
-            - **ANSWER** in the SAME language and style.
-              - If the user asks in Hindi, answer in Hindi.
-              - If the user asks in \"Hinglish\" (WhatsApp style), answer in Hinglish.
-              - If the user asks in English, answer in English.
+            {lang_instruction}
             
             CRITICAL INSTRUCTION - HANDLING ERRORS:
             1. **Transcript Errors**: The transcript is imperfect (e.g., \"one new man\" -> \"Von Neumann\"). mentally correct these errors.
@@ -538,9 +588,7 @@ IMPORTANT INSTRUCTIONS (Use for notebook-quality math notes):
             2. If the answer is not in the context, do NOT hallucinate. State that the topic is not found.
             3. VISUALIZATION:
                - Provide an ASCII diagram ONLY for complex data structures.
-            4. EXPLANATION:
-               - Explain algorithms step-by-step.
-               - Be detailed and comprehensive.
+            4. EXPLANATION:\n               - Explain algorithms step-by-step.\n               - Be detailed and comprehensive.\n            5. MATHEMATICS (CRITICAL):\n               - ALL mathematical formulas, variables, equations, and Greek letters MUST be formatted in LaTeX mode.\n               - Wrap ALL inline math in single dollar signs (e.g. \\(a, b, \\\\alpha)\\\$).\n               - Wrap ALL block/standalone equations in double dollar signs (e.g. \\$\\\^T x_p + b = 0\\$\\\$).\n               - NEVER output plain text math formulas.
             {citation_rule}
 
             CONTEXT:

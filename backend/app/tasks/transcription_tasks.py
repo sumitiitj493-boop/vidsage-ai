@@ -5,13 +5,13 @@ from app.utils.audio_preprocess import preprocess_audio
 import os
 
 
-def _perform_job(job_id: str, file_path: str):
+def _perform_job(job_id: str, file_path: str, force_whisper: bool = False):   
     """Core transcription pipeline used by the Celery worker."""
     job_manager.update_file_path(job_id, file_path)
     job_manager.update_status(job_id, "preprocessing")
 
     # prepare audio
-    preprocessed = preprocess_audio(file_path)
+    preprocessed = preprocess_audio(file_path, enhance_audio=force_whisper)
     job_manager.update_status(job_id, "transcribing")
 
     # transcription with progress reporting
@@ -58,7 +58,7 @@ def _perform_job(job_id: str, file_path: str):
         last_time = now
         last_percent = percent
 
-    result = transcription_service.transcribe(preprocessed, progress_callback=_log_progress)
+    result = transcription_service.transcribe(preprocessed, progress_callback=_log_progress, force_accuracy=force_whisper)
 
     # cleanup temp file
     if preprocessed != file_path and os.path.exists(preprocessed):
@@ -76,13 +76,7 @@ def _perform_job(job_id: str, file_path: str):
         for s in result.segments
     ]
 
-    # index
-    from app.services.rag_service import rag_service
-    try:
-        rag_service.index_video(job_id, segments_data)
-    except Exception as e:
-        print(f"RAG indexing error in celery task for {job_id}: {e}", flush=True)
-
+    # Complete the job FIRST so the user gets the transcript immediately!
     job_manager.complete_job(job_id, {
         "raw_text": result.text,
         "cleaned_text": cleaned["cleaned_text"],
@@ -92,6 +86,9 @@ def _perform_job(job_id: str, file_path: str):
         "segments": segments_data,
     })
 
+    # Indexing in the background using a separate Celery task
+    index_video_task.delay(job_id, segments_data)
+
 
 @celery.task(bind=True)
 def process_audio_job(self, job_id: str, file_path: str):
@@ -100,4 +97,14 @@ def process_audio_job(self, job_id: str, file_path: str):
     except Exception as exc:
         job_manager.fail_job(job_id, str(exc))
         raise self.retry(exc=exc, countdown=60, max_retries=3)
+
+
+@celery.task(bind=True)
+def index_video_task(self, job_id: str, segments_data: list):
+    try:
+        from app.services.rag_service import rag_service
+        rag_service.index_video(job_id, segments_data)
+        print(f"RAG indexing completed for {job_id}", flush=True)
+    except Exception as e:
+        print(f"RAG indexing error in celery task for {job_id}: {e}", flush=True)
 
