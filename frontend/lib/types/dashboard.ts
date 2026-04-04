@@ -19,5 +19,5 @@ export interface ChatSession {
 
 export type InputMode = "youtube" | "pdf" | "audio";
 export type DashboardStage = "empty" | "processing" | "ready";
-export type ActiveMode = "transcript" | "notes" | "progress";
+export type ActiveMode = "transcript" | "notes" | "progress" | "mindmap" | "summary";
 export type NotesFormat = "markdown" | "latex";

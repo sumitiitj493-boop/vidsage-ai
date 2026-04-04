@@ -22,6 +22,8 @@ import NotesView from "./dashboard/NotesView";
 import ChatWindow from "./dashboard/ChatWindow";
 import LandingView from "./dashboard/LandingView";
 import ProcessingLoader from "./dashboard/ProcessingLoader";
+import MindMapView from "./dashboard/MindMapView";
+import SummaryView from "./dashboard/SummaryView";
 
 import HistoryModal from "./dashboard/HistoryModal";
 
@@ -173,6 +175,12 @@ export default function Dashboard() {
                     downloadNotesHtml={notes.downloadNotesHtml} downloadNotesPdfBackend={notes.downloadNotesPdfBackend}
                     openInOverleaf={notes.openInOverleaf} downloadNotesLatex={notes.downloadNotesLatex} getNotesLatex={notes.getNotesLatex as any} printNotesPdf={notes.printNotesPdf}
                   />
+                )}
+                {processor.activeMode === "mindmap" && (
+                  <MindMapView videoId={videoId!} />
+                )}
+                {processor.activeMode === "summary" && (
+                  <SummaryView videoId={videoId!} />
                 )}
 
                 {/* Integrated Chat Panel Overlay */}

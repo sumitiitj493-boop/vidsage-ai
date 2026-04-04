@@ -1,4 +1,5 @@
 import { RefObject } from "react";
+import Link from "next/link";
 import { FileText, Upload } from "lucide-react";
 import { InputMode, DashboardStage } from "../../lib/types/dashboard";
 
@@ -31,15 +32,15 @@ export default function DashboardHeader({
 
   return (
     <header className="flex items-center justify-between gap-4 px-6 py-6 border-b border-white/5 bg-slate-900/30">
-      <div className="flex items-center gap-3">
+      <Link href="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
         <div className="h-10 w-10 rounded-xl bg-amber-500 flex items-center justify-center text-lg font-bold text-slate-950 shadow-lg shadow-amber-500/40 animate-spin-slow">
           V
         </div>
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">VidSage</h1>
           <p className="text-sm text-slate-300">AI Study Buddy for Videos</p>
-        </div>
-      </div>
+          </div>
+      </Link>
 
       <div className="flex-1 max-w-3xl ml-8">
         <div className="flex items-center gap-2">

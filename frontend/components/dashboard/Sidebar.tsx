@@ -215,6 +215,30 @@ export default function DashboardSidebar({
             <span>Masterclass Notes</span>
             <div className={`w-1.5 h-1.5 rounded-full transition-colors ${activeMode === "notes" ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]" : "bg-transparent"}`}></div>
           </button>
+          <button
+            onClick={() => setActiveMode("mindmap" as ActiveMode)}
+            className={
+              "flex items-center justify-between rounded-xl px-4 py-3.5 text-sm font-medium transition-all group " +
+              (activeMode === "mindmap"
+                ? "bg-slate-800 text-white shadow-md border border-white/10"
+                : "bg-transparent text-slate-400 hover:bg-slate-800/50 hover:text-slate-200 border border-transparent")
+            }
+          >
+            <span>Mind Map</span>
+            <div className={`w-1.5 h-1.5 rounded-full transition-colors ${activeMode === "mindmap" ? "bg-violet-400 shadow-[0_0_8px_rgba(167,139,250,0.6)]" : "bg-transparent"}`}></div>
+          </button>
+          <button
+            onClick={() => setActiveMode("summary" as ActiveMode)}
+            className={
+              "flex items-center justify-between rounded-xl px-4 py-3.5 text-sm font-medium transition-all group " +
+              (activeMode === "summary"
+                ? "bg-slate-800 text-white shadow-md border border-white/10"
+                : "bg-transparent text-slate-400 hover:bg-slate-800/50 hover:text-slate-200 border border-transparent")
+            }
+          >
+            <span>Revision Summary</span>
+            <div className={`w-1.5 h-1.5 rounded-full transition-colors ${activeMode === "summary" ? "bg-blue-400 shadow-[0_0_8px_rgba(96,165,250,0.6)]" : "bg-transparent"}`}></div>
+          </button>
         </div>
       </div>
 
