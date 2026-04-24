@@ -1,11 +1,10 @@
 import json
 import logging
 from typing import Any, Dict, Generator, List, Optional
+from threading import Lock
 
 import chromadb
 import requests
-from sentence_transformers import SentenceTransformer
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from groq import Groq
 
 from app.config import settings
@@ -22,20 +21,13 @@ class RateLimitError(Exception):
 
 class RAGService:
     def __init__(self):
-        # 1. Initialize the "Brain" (Embeddings)
-        # We switch to a Multilingual model to support Hindi/Hinglish/English mix
-        # 'paraphrase-multilingual-MiniLM-L12-v2' (Multilingual, 384 dim, ~470MB)
-        logger.info("Loading RAG Embedding Model (Multilingual)...")
-        self.embedding_model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2') 
-        
-        # 2. Initialize "Memory" (ChromaDB)
-        # Persist data to ./chroma_db folder so it survives restarts
-        logger.info(f"Connecting to ChromaDB at: {settings.CHROMA_DB_DIR}")
-        self.chroma_client = chromadb.PersistentClient(path=settings.CHROMA_DB_DIR)
-        
-        # 3. Initialize "Logic" (LLM)
-        # Groq needs an API key; if absent we will fallback to OpenRouter.
-        self.groq_client = Groq(api_key=settings.GROQ_API_KEY) if settings.GROQ_API_KEY else None
+        # Lazy runtime resources (heavy models and external clients).
+        self.embedding_model = None
+        self.chroma_client = None
+        self.groq_client = None
+        self._runtime_lock = Lock()
+
+        # Config state (cheap) can be loaded eagerly.
         self.groq_enabled = bool(settings.GROQ_API_KEY)
 
         # OpenRouter / OpenAI-compatible fallback
@@ -44,6 +36,38 @@ class RAGService:
         self.openrouter_model = settings.OPENROUTER_MODEL
         self.openrouter_timeout = settings.OPENROUTER_TIMEOUT
         self.openrouter_enabled = bool(self.openrouter_key)
+
+    def _ensure_runtime(self) -> None:
+        """Initialize shared clients that are needed for most operations."""
+        if self.chroma_client is not None:
+            return
+
+        with self._runtime_lock:
+            if self.chroma_client is None:
+                logger.info(f"Connecting to ChromaDB at: {settings.CHROMA_DB_DIR}")
+                self.chroma_client = chromadb.PersistentClient(path=settings.CHROMA_DB_DIR)
+
+            if self.groq_enabled and self.groq_client is None:
+                self.groq_client = Groq(api_key=settings.GROQ_API_KEY)
+
+    def _ensure_embedding_model(self) -> None:
+        if self.embedding_model is not None:
+            return
+
+        with self._runtime_lock:
+            if self.embedding_model is None:
+                logger.info("Loading RAG Embedding Model (Multilingual)...")
+                from sentence_transformers import SentenceTransformer
+
+                self.embedding_model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+
+    def _ensure_groq_client(self) -> None:
+        if not self.groq_enabled or self.groq_client is not None:
+            return
+
+        with self._runtime_lock:
+            if self.groq_enabled and self.groq_client is None:
+                self.groq_client = Groq(api_key=settings.GROQ_API_KEY)
 
     def _build_strict_latex_prompt(self, base_prompt: str) -> str:
         return f"""
@@ -229,6 +253,7 @@ IMPORTANT INSTRUCTIONS (Use for notebook-quality math notes):
         force_local: bool = False,
     ) -> Generator[str, None, None]:
         """Stream text using Groq (single chunk) or OpenRouter (live)."""
+        self._ensure_groq_client()
         prompt = self._messages_to_prompt(messages)
 
         # Try Groq first with robust model fallback
@@ -281,6 +306,8 @@ IMPORTANT INSTRUCTIONS (Use for notebook-quality math notes):
         TEACH MODE: Chunks the transcript SEGMENTS and saves it to Vector DB with timestamps.
         segments format: [{"text": "...", "start": 0.0, "end": 10.0}, ...]
         """
+        self._ensure_runtime()
+        self._ensure_embedding_model()
         logger.info(f"Indexing video {video_id} for RAG with timestamps...")
         
         chunks = []
@@ -361,6 +388,8 @@ IMPORTANT INSTRUCTIONS (Use for notebook-quality math notes):
         EXAM MODE: Retrieves context and answers the question.
         Returns the answer or an error message.
         """
+        self._ensure_runtime()
+        self._ensure_embedding_model()
         try:
             collection_name = f"video_{video_id}"
             
@@ -416,9 +445,10 @@ IMPORTANT INSTRUCTIONS (Use for notebook-quality math notes):
             if is_pdf and has_page_numbers:
                 citation_rule = """
             5. CITATIONS (CRITICAL):
-               - You MUST cite the page number for key facts IF they are available in context.
+               - You MUST cite the exact page number(s) where the fact was found.
+               - If the same concept appears on multiple pages, list all of them (e.g. "Page: 2, Page: 5").
+               - DO NOT invent or mix up page numbers. Only use the precise [Page: X] tags provided next to the text snippet.
                - Format: (Page: X)
-               - Example: "The CPU fetches instructions (Page: 2)..."
                 """
             elif has_valid_timestamps:
                 citation_rule = """
@@ -493,6 +523,8 @@ IMPORTANT INSTRUCTIONS (Use for notebook-quality math notes):
 
     def answer_question_stream(self, video_id: str, question: str, language: str = "auto") -> Generator[str, None, None]:
         """Stream the answer text as it is generated."""
+        self._ensure_runtime()
+        self._ensure_embedding_model()
         try:
             collection_name = f"video_{video_id}"
 
@@ -609,10 +641,113 @@ IMPORTANT INSTRUCTIONS (Use for notebook-quality math notes):
             logger.error(f"Error answering question for video {video_id}: {str(e)}")
             yield f"Error occurred while generating answer: {str(e)}"
 
+    def generate_summary(self, video_id: str) -> str:
+        """Create a highly optimized Markdown revision summary of the entire video."""
+        self._ensure_runtime()
+        try:
+            collection = self.chroma_client.get_collection(f"video_{video_id}")
+            
+            # Fetch a broad sample of chunks (e.g., 25)
+            results = collection.get(limit=25)
+            docs = results["documents"]
+            context = "\n".join(docs)
+            
+            prompt = f"""
+            You are an expert educator and study guide creator. 
+            Create a highly structured, visually stunning "Revision Summary" of the following video transcript.
+            
+            CRITICAL FORMATTING RULES (STRICTLY REQUIRED):
+            1. PURE MARKDOWN FOR TABLES: Use standard Markdown tables (`| Col | Col |`). Do not wrap tables or headers (`##`) inside any custom tags. Leave them free-floating. 
+            2. INTERACTIVE BLOCKS FOR ALL TEXT: EVERY single paragraph, list, or explanation MUST be wrapped inside one of these custom XML-like tags. Do NOT output free-floating paragraphs.
+               - `<card>Your general explanations or bullet points here...</card>` (Renders as a beautiful interactive Blue/Slate glass card)
+               - `<tip>Your pro-tip here...</tip>` (Renders as a vivid Purple Pro-Tip box)
+               - `<warning>Your warning here...</warning>` (Renders as a deep Red Danger box)
+               - `<important>Your key definition here...</important>` (Renders as a bright Emerald Important box)
+            3. COLORED SUB-HEADERS: For definitions or lists of terms, use `#### ` (Heading 4). Our system automatically colors `#### ` headers in bright Emerald Green!
+               Example: `#### ⚙️ Fixed Partitioning`
+               Do not prefix custom tags with `###` or `####`.
+            4. TECHNICAL BADGES: Wrap technical variables or keywords in standard markdown backticks (` ` `). They will automatically render as pink highlighted badges.
+            5. MATH STYLING: Use precise LaTeX for equations (wrap inline math in `$` and block math in `$$`).
+            6. LANGUAGE: You MUST generate the summary strictly in professional English, no matter what language the transcript is in.
+            
+            MANDATORY SECTIONS (Output exactly with `##`):
+            ## 🌟 Executive Summary
+            ## 📊 Concept Breakdown (Include detailed Markdown tables)
+            ## ⚙️ Core Mechanisms / Processes
+            ## 💡 Key Takeaways & Cheat Sheet
+            
+            TRANSCRIPT CONTEXT:
+            {context}
+            """
+            
+            answer = self.chat_completion(
+                messages=[{"role": "user", "content": prompt}],
+                model="llama-3.3-70b-versatile",
+                temperature=0.3,
+            )
+            
+            return answer.strip()
+        except Exception as e:
+            logger.error(f"Error generating summary for {video_id}: {e}")
+            return f"❌ Error generating summary: {str(e)}"
+
+    def generate_mindmap(self, video_id: str) -> str:
+        """Generate a Mermaid.js flowchart (mind map) from the video context."""
+        self._ensure_runtime()
+        try:
+            collection = self.chroma_client.get_collection(f"video_{video_id}")
+            
+            # Fetch a sample of the most central topics (e.g., 10-15 chunks)
+            results = collection.get(limit=15)
+            docs = results["documents"]
+            context = "\n".join(docs)
+            
+            prompt = f"""
+            You are an expert knowledge architect. Create a comprehensive Mermaid.js flowchart (graph TD) that maps the core concepts from the following transcript.
+            
+            CRITICAL MERMAID SYNTAX RULES (FAILURE TO FOLLOW BREAKS THE RENDERER):
+            1. ONLY output valid Mermaid code block starting with graph TD. Nothing else. No python code block tags, no ```mermaid or ``` around the output. JUST the graph code.
+            2. Node IDs MUST be simple alphabetic words (A, B, C, Node1, SubNode2). NO spaces, NO dashes, NO special characters.
+            3. Node text MUST be wrapped in brackets [like this].
+            4. Do NOT use double quotes (") or single quotes (') anywhere inside node text. Replace them with spaces or omit them.
+            5. Do NOT use parentheses () or brackets [] inside node text. Use spaces.
+            6. Keep node text concise (max 3-5 words).
+            7. Ensure every connection uses exact syntax: Node1 --> Node2
+            8. Only output the raw text, don't wrap it in anything.
+            
+            Example Perfect Output:
+            graph TD
+              A[Machine Learning] --> B[Supervised]
+              A --> C[Unsupervised]
+              B --> D[Classification]
+              B --> E[Regression]
+              C --> F[Clustering]
+              
+            TRANSCRIPT CONTEXT:
+            {context}
+            """
+            
+            answer = self.chat_completion(
+                messages=[{"role": "user", "content": prompt}],
+                model="llama-3.3-70b-versatile",
+                temperature=0.1,
+            )
+            
+            # Clean off any potential bolding or code blocks the LLM still tries to add
+            answer = answer.replace('```mermaid', '').replace('```', '').strip()
+            
+            return answer
+        except Exception as e:
+            logger.error(f"Error generating mindmap for {video_id}: {e}")
+            return "graph TD\n  A[Error] --> B[Could not generate graph]"
+
+
+
     def generate_suggested_questions(self, video_id: str) -> list[str]:
         """
         Generates 5 suggested questions based on the video context.
         """
+        self._ensure_runtime()
         try:
             collection_name = f"video_{video_id}"
             try:
@@ -699,6 +834,7 @@ IMPORTANT INSTRUCTIONS (Use for notebook-quality math notes):
 
         output_format: "markdown" or "latex"
         """
+        self._ensure_runtime()
         collection_name = f"video_{video_id}"
 
         try:
@@ -883,19 +1019,20 @@ Transcript Segment:
 
 OUTPUT (LaTeX format only, no markdown):"""
             else:
-                prompt = f"""You are an elite AI educational writer generating a premium Masterclass study guide.
+                prompt = f"""You are an elite AI educational writer generating a premium Masterclass study guide chapter.
 Continue writing comprehensive, flowing course notes based on the following transcript segment.
-DO NOT use repetitive structures like starting every single section with "> **Summary:**" or a bullet list.
 
-Guidelines:
-- Write fluidly, like a well-edited textbook or premium article.
-- Use Markdown headers (`### Your Creative Subheading`) to separate concepts. Let headers be creative, NOT literal labels like "Blockquotes".
-- Use **bold text** for key terms and new vocabulary.
-- Start important insights, quotes, or key formulas with a `>` character at the beginning of the line so they render as blockquotes. Do NOT write the word "Blockquote".
-- Use `- ` bullet points occasionally for lists, but rely on flowing paragraphs too.
-- If explaining Math or formulas, use `$$ formula $$` on its own line and explain its variables.
-- Keep every equation delimiter balanced. Prefer a single complete block equation over partial inline fragments.
-- Connect ideas logically.
+CRITICAL FORMATTING RULES (STRICTLY REQUIRED):
+1. PURE MARKDOWN FOR TABLES: Use standard Markdown tables (`| Col | Col |`). Do not wrap tables or headers (`##`) inside any custom tags. Leave them free-floating. 
+2. INTERACTIVE BLOCKS FOR ALL TEXT: EVERY single paragraph, list, or explanation MUST be wrapped inside one of these custom XML-like tags. Do NOT output free-floating paragraphs.
+   - `<card>Your general explanations or bullet points here...</card>` (For standard teaching points, analogies, and detailed explanations)
+   - `<tip>Your pro-tip here...</tip>` (For insightful tips and shortcuts)
+   - `<warning>Your warning here...</warning>` (For common mistakes or caveats)
+   - `<important>Your key definition here...</important>` (For core concepts and definitions)
+3. COLORED SUB-HEADERS: Let headers be creative, NOT literal labels like "Blockquotes". Use `### ` or `#### `. Our system automatically styles these creatively.
+4. TECHNICAL BADGES: Wrap technical variables or keywords in standard markdown backticks (` ` `).
+5. MATH STYLING: Use precise LaTeX for equations (wrap inline math in `$` and block math in `$$`).
+6. LANGUAGE: Generate notes strictly in professional English.
 
 Previous Context (pick up the flow from here):
 {prev_context[-800:] if prev_context else "This is the start of the lecture."}
@@ -917,12 +1054,23 @@ OUTPUT (Markdown format):"""
                 else:
                     note = f"### Segment Notes ({ts})\n> AI limits reached.\n- Processing skipped for this portion."
 
-            # Fix newlines
-            import re
-            note = re.sub(r"<[^>]+>", "", note).strip()
+            # Clean up output but DO NOT strip our custom HTML/XML tags
             note = note.replace("\r\n", "\n").strip()
 
             if output_format.lower() == "latex":
+                # For LaTeX exports, we need to convert the custom markdown XML tags into actual LaTeX boxes
+                # so the LaTeX compiler (pdflatex) doesn't just print raw XML to the PDF page.
+                import re
+                
+                # Convert <card>
+                note = re.sub(r"<card>(.*?)</card>", r"\\begin{tcolorbox}[colback=blue!5!white,colframe=blue!75!black,title=Explanation]\n\1\n\\end{tcolorbox}", note, flags=re.DOTALL)
+                # Convert <tip>
+                note = re.sub(r"<tip>(.*?)</tip>", r"\\begin{tcolorbox}[colback=purple!5!white,colframe=purple!75!black,title=Pro Tip]\n\1\n\\end{tcolorbox}", note, flags=re.DOTALL)
+                # Convert <warning>
+                note = re.sub(r"<warning>(.*?)</warning>", r"\\begin{tcolorbox}[colback=red!5!white,colframe=red!75!black,title=Warning]\n\1\n\\end{tcolorbox}", note, flags=re.DOTALL)
+                # Convert <important>
+                note = re.sub(r"<important>(.*?)</important>", r"\\begin{tcolorbox}[colback=green!5!white,colframe=green!75!black,title=Important Concept]\n\1\n\\end{tcolorbox}", note, flags=re.DOTALL)
+
                 return {"cell_type": "markdown", "metadata": {}, "source": [note + "\n\n"]}, note
 
             return {"cell_type": "markdown", "metadata": {}, "source": [note + "\n\n"]}, note

@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import mermaid from "mermaid";
 import { Loader2, AlertCircle, RefreshCw, Download, ZoomIn, ZoomOut, Maximize, Minimize } from "lucide-react";
+import { authFetch, getApiBase } from "../../lib/auth";
 
 interface MindMapViewProps {
   videoId: string | null;
@@ -16,6 +17,8 @@ export default function MindMapView({ videoId }: MindMapViewProps) {
   const [zoomLevel, setZoomLevel] = useState(1);
   const [isFullScreen, setIsFullScreen] = useState(false);
 
+  const cacheKey = videoId ? `vidsage_mindmap_${videoId}` : null;
+
   const fetchGraph = async () => {
     if (!videoId) return;
     setLoading(true);
@@ -24,8 +27,7 @@ export default function MindMapView({ videoId }: MindMapViewProps) {
     setZoomLevel(1);
 
     try {
-      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
-      const res = await fetch(`${baseUrl}/api/chat/mindmap/${videoId}`);
+      const res = await authFetch(`${getApiBase()}/api/chat/mindmap/${videoId}`);
       if (!res.ok) {
         throw new Error("Failed to generate mind map");
       }
@@ -35,6 +37,10 @@ export default function MindMapView({ videoId }: MindMapViewProps) {
 
       // Robust error stripping logic: remove triple backticks if present
       code = code.replace(/```mermaid/g, '').replace(/```/g, '').trim();
+      setGraphCode(code);
+      if (cacheKey) {
+        sessionStorage.setItem(cacheKey, code);
+      }
       renderMermaid(code);
 
     } catch (err: any) {
@@ -80,10 +86,19 @@ export default function MindMapView({ videoId }: MindMapViewProps) {
   };
 
   useEffect(() => {
-    if (videoId && !graphCode && !loading && !error) {
+    if (!videoId) return;
+    if (cacheKey && !graphCode) {
+      const cached = sessionStorage.getItem(cacheKey);
+      if (cached) {
+        setGraphCode(cached);
+        renderMermaid(cached);
+        return;
+      }
+    }
+    if (!graphCode && !loading && !error) {
       fetchGraph();
     }
-  }, [videoId]);
+  }, [videoId, cacheKey, graphCode, loading, error]);
 
   if (!videoId) {
     return (

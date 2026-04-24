@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import { VideoDownloadState, InputMode, DashboardStage, ActiveMode } from "../lib/types/dashboard";
+import { authFetch } from "../lib/auth";
 
 export function useVideoProcessor() {
   const [videoUrl, setVideoUrl] = useState("");
@@ -22,12 +23,13 @@ export function useVideoProcessor() {
   
   const isAudioDone = audioStatus === "completed" || (audioProgress !== null && audioProgress >= 100);
   const isProcessing = stage === "processing";
+  const [isWhisperActive, setIsWhisperActive] = useState(false);
 
   const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
   const pollAudioStatus = useCallback(async (jobId: string) => {
     try {
-      const res = await fetch(`${apiBase}/api/audio/status/${jobId}`);
+      const res = await authFetch(`${apiBase}/api/audio/status/${jobId}`);
       const data = await res.json();
       setAudioStatus(data.status);
 
@@ -36,7 +38,7 @@ export function useVideoProcessor() {
       if (typeof data.estimated === "number") setAudioEstimated(data.estimated);
 
       if (data.status === "completed") {
-        const result = await fetch(`${apiBase}/api/audio/result/${jobId}`);
+        const result = await authFetch(`${apiBase}/api/audio/result/${jobId}`);
         const rl = await result.json();
         if (rl.status === "completed") {
           const theData = rl.result;
@@ -70,7 +72,7 @@ export function useVideoProcessor() {
           setStage("ready");
 
           try {
-            const suggRes = await fetch(`${apiBase}/api/chat/suggest/${jobId}`);
+            const suggRes = await authFetch(`${apiBase}/api/chat/suggest/${jobId}`);
             if (suggRes.ok) {
               const suggData = await suggRes.json();
               if (Array.isArray(suggData.questions)) {
@@ -101,6 +103,7 @@ export function useVideoProcessor() {
     setAudioJobId(null);
     setAudioStatus(null);
     setAudioProgress(null);
+    setIsWhisperActive(!!opts.forceWhisper);
 
     try {
       let data: any;
@@ -109,7 +112,7 @@ export function useVideoProcessor() {
         const rawUrl = videoUrl.trim();
         const normalizedUrl = rawUrl.startsWith("http") ? rawUrl : `https://${rawUrl}`;
 
-        const res = await fetch(`${apiBase}/api/video/download`, {
+        const res = await authFetch(`${apiBase}/api/video/download`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -117,18 +120,24 @@ export function useVideoProcessor() {
             force_whisper: opts.forceWhisper ?? false,
           }),
         });
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => ({}));
+          throw new Error(errorData?.detail || errorData?.message || "Failed to process video");
+        }
         data = await res.json();
-        if (!res.ok) throw new Error(data?.detail || data?.message || "Failed to process video");
       } else if (inputMode === "pdf") {
         if (!pdfFile) throw new Error("Select a PDF file first.");
         const form = new FormData();
         form.append("file", pdfFile);
-        const res = await fetch(`${apiBase}/api/pdf/upload`, {
+        const res = await authFetch(`${apiBase}/api/pdf/upload`, {
           method: "POST",
           body: form,
         });
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => ({}));
+          throw new Error(errorData?.detail || errorData?.message || "Failed to upload PDF");
+        }
         data = await res.json();
-        if (!res.ok) throw new Error(data?.detail || data?.message || "Failed to upload PDF");
       } else if (inputMode === "audio") {
         if (!audioFile) throw new Error("Select an audio file first.");
         const form = new FormData();
@@ -136,12 +145,15 @@ export function useVideoProcessor() {
         if (opts.forceWhisper) {
           form.append("force_whisper", "true");
         }
-        const res = await fetch(`${apiBase}/api/audio/upload`, {
+        const res = await authFetch(`${apiBase}/api/audio/upload`, {
           method: "POST",
           body: form,
         });
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => ({}));
+          throw new Error(errorData?.detail || errorData?.message || "Failed to upload audio");
+        }
         const result = await res.json();
-        if (!res.ok) throw new Error(result?.detail || result?.message || "Failed to upload audio");
         if (!result.job_id) throw new Error("No job id returned");
         setAudioJobId(result.job_id);
         setAudioStatus("uploading");
@@ -193,7 +205,7 @@ export function useVideoProcessor() {
       }
 
       try {
-        const suggRes = await fetch(`${apiBase}/api/chat/suggest/${data.video_id || data.pdf_id}`);
+        const suggRes = await authFetch(`${apiBase}/api/chat/suggest/${data.video_id || data.pdf_id}`);
         if (suggRes.ok) {
           const suggData = await suggRes.json();
           if (Array.isArray(suggData.questions)) {
@@ -208,6 +220,8 @@ export function useVideoProcessor() {
     } catch (err) {
       setDownloadState({ status: "error", error: err instanceof Error ? err.message : String(err) });
       setStage("empty");
+    } finally {
+      setIsWhisperActive(false);
     }
   };
 
@@ -225,6 +239,7 @@ export function useVideoProcessor() {
     setAudioProgress(null);
     setAudioElapsed(null);
     setAudioEstimated(null);
+    setIsWhisperActive(false);
   };
 
   const loadSession = (videoId: string, title?: string) => {
@@ -254,6 +269,7 @@ export function useVideoProcessor() {
     suggestedQuestions,
     isAudioDone,
     isProcessing,
+    isWhisperActive,
     processVideo,
     resetSession,
     loadSession,

@@ -126,6 +126,7 @@ class YouTubeTranscriptService:
             {
                 "text": s.text,
                 "start": s.start,
+                "end": s.start + s.duration,
                 "duration": s.duration
             }
             for s in segments_raw

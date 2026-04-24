@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Copy, ExternalLink, Download, Play, Pause } from "lucide-react";
 import { InputMode, ActiveMode } from "../../lib/types/dashboard";
 import { truncateMiddle } from "../../lib/utils/formatters";
+import { authFetch, getApiBase } from "../../lib/auth";
 
 interface SidebarProps {
   videoId: string;
@@ -60,7 +61,7 @@ export default function DashboardSidebar({
     if (isDownloadingAudio) return;
     try {
       setIsDownloadingAudio(true);
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000"}/api/video/audio/${videoId}`);
+      const res = await authFetch(`${getApiBase()}/api/video/audio/${videoId}`);
       if (!res.ok) throw new Error("Network error");
 
       const blob = await res.blob();
@@ -171,10 +172,13 @@ export default function DashboardSidebar({
            </div>
         )}
         
-        {(source === "youtube_auto" || source === "audio_upload") && (
+        {(source === "youtube_auto" || source === "audio_upload" || source === "youtube_auto_rejected" || source === "no_transcript") && (
           <div className="p-4 bg-amber-950/20 border-t border-amber-500/10"> 
             <p className="text-[11px] leading-relaxed text-amber-200/90 tracking-wide text-center">
-              {source === "audio_upload" ? "Standard fast transcription applied." : "Using auto-generated transcript."}
+              {source === "audio_upload" ? "Standard fast transcription applied." : 
+               source === "no_transcript" ? "No YouTube transcript found." :
+               source === "youtube_auto_rejected" ? "YouTube transcript rejected." :
+               "Using auto-generated transcript."}
             </p>
             <button
               type="button"
@@ -182,7 +186,7 @@ export default function DashboardSidebar({
               disabled={isProcessing}
               className="mt-3 w-full rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 px-3 py-2 text-xs font-bold text-black hover:from-amber-400 hover:to-orange-400 disabled:opacity-50 transition-all shadow-lg shadow-amber-500/20"
             >
-              {isProcessing ? "Processing..." : (source === "audio_upload" ? "Force High-Accuracy AI" : "Force Whisper AI")}
+              {isProcessing ? "Processing..." : (source === "audio_upload" ? "Force High-Accuracy AI" : "Try Whisper AI")}
             </button>
           </div>
         )}

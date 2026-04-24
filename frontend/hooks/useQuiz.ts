@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
+import { authFetch } from "../lib/auth";
 
 export type QuizQuestionType = "mcq" | "subjective" | "numerical" | "mixed";
 
@@ -56,7 +57,7 @@ export function useQuiz() {
         if (transcriptId) payload.transcriptId = transcriptId;
         if (context) payload.context = context;
 
-        const res = await fetch(`${apiBase}/api/quiz/generate`, {
+        const res = await authFetch(`${apiBase}/api/quiz/generate`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",

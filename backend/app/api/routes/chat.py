@@ -37,3 +37,26 @@ def get_suggested_questions(video_id: str):
     """
     questions = rag_service.generate_suggested_questions(video_id)
     return {"questions": questions}
+
+@router.get("/summary/{video_id}")
+def get_summary(video_id: str):
+    """
+    Generate an optimized revision summary.
+    """
+    try:
+        summary_text = rag_service.generate_summary(video_id)
+        return {"summary": summary_text}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/mindmap/{video_id}")
+def get_mindmap(video_id: str):
+    """
+    Generate a Mermaid.js mindmap based on the video context.
+    """
+    try:
+        mindmap_code = rag_service.generate_mindmap(video_id)
+        return {"mermaid": mindmap_code}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+

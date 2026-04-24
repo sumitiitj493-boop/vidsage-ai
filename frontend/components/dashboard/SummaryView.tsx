@@ -8,6 +8,7 @@ import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
 import { Loader2, RefreshCw, Download, FileText, Globe } from "lucide-react";
 import { normalizeMathMarkdown } from "../../lib/utils/markdown";
+import { authFetch, getApiBase } from "../../lib/auth";
 
 interface SummaryViewProps {
   videoId: string | null;
@@ -18,19 +19,24 @@ export default function SummaryView({ videoId }: SummaryViewProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const cacheKey = videoId ? `vidsage_summary_${videoId}` : null;
+
   const fetchSummary = async () => {
     if (!videoId) return;
     setLoading(true);
     setError(null);
 
     try {
-      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
-      const res = await fetch(`${baseUrl}/api/chat/summary/${videoId}`);
+      const res = await authFetch(`${getApiBase()}/api/chat/summary/${videoId}`);
       if (!res.ok) {
         throw new Error("Failed to generate summary");
       }
       const data = await res.json();
-      setSummary(data.summary || "No summary generated.");
+      const generated = data.summary || "No summary generated.";
+      setSummary(generated);
+      if (cacheKey) {
+        sessionStorage.setItem(cacheKey, generated);
+      }
     } catch (err: any) {
       setError(err.message || "Failed to load summary. Ensure the video is fully processed.");
     } finally {
@@ -89,11 +95,15 @@ export default function SummaryView({ videoId }: SummaryViewProps) {
     /* Ensure elements force print styling inside browser if printed later */
     @media print {
       body { background-color: white !important; }
-      .export-container { max-width: 100%; }
+      .export-container { max-width: 100%; top: 0 !important; margin: 0 !important; }
+      .no-print { display: none !important; }
     }
   </style>
 </head>
 <body>
+  <div class="no-print" style="position: sticky; top: 0; z-index: 50; padding: 16px; background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(10px); border-bottom: 1px solid #1e293b; display: flex; justify-content: flex-end; margin-bottom: 24px;">
+    <button onclick="window.print()" style="background: #4f46e5; color: white; border: none; padding: 10px 20px; font-size: 14px; font-weight: 600; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3); transition: all 0.2s;">🖨️ Print / Save as PDF</button>
+  </div>
   <div class="export-container">
     ${element.outerHTML}
   </div>
@@ -116,10 +126,18 @@ export default function SummaryView({ videoId }: SummaryViewProps) {
   };
 
   useEffect(() => {
-    if (videoId && !summary && !loading && !error) {
+    if (!videoId) return;
+    if (cacheKey && !summary) {
+      const cached = sessionStorage.getItem(cacheKey);
+      if (cached) {
+        setSummary(cached);
+        return;
+      }
+    }
+    if (!summary && !loading && !error) {
       fetchSummary();
     }
-  }, [videoId]);
+  }, [videoId, cacheKey, summary, loading, error]);
 
   if (!videoId) {
     return (
@@ -217,7 +235,7 @@ export default function SummaryView({ videoId }: SummaryViewProps) {
                 <ReactMarkdown
                     remarkPlugins={[remarkMath, remarkGfm]}
                     rehypePlugins={[rehypeKatex, rehypeRaw] as any}
-                    components={{
+                    components={({
                       card: ({node, children, ...props}: any) => (
                         <div className="bg-gradient-to-br from-slate-800/60 to-slate-900/80 border border-slate-700/50 p-6 my-6 rounded-2xl shadow-xl hover:shadow-indigo-500/20 hover:border-indigo-400/30 transition-all duration-300 [&>p:first-child]:mt-0 [&>p:last-child]:mb-0 [&>ul]:m-0 [&>ol]:m-0 [&_li]:my-1" {...props}>
                           {children}
@@ -241,7 +259,7 @@ export default function SummaryView({ videoId }: SummaryViewProps) {
                           <div className="text-slate-200">{children}</div>
                         </div>
                       ),
-                    }}
+                    } as any)}
                 >
                     {normalizeMathMarkdown(summary, videoId)}
                 </ReactMarkdown>

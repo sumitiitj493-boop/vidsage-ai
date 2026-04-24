@@ -3,9 +3,11 @@ import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import remarkGfm from "remark-gfm";
 import rehypeKatex from "rehype-katex";
+import rehypeRaw from "rehype-raw";
 import { normalizeMathMarkdown } from "../../lib/utils/markdown";
 import { NotesFormat } from "../../lib/types/dashboard";
 import { Loader2, Play } from "lucide-react";
+import { authFetch, getApiBase } from "../../lib/auth";
 
 interface NotesViewProps {
   videoId: string | undefined | null;
@@ -44,7 +46,7 @@ export default function NotesView({
     setIsCompiling(true);
     setPdfUrl(null);
     try {
-      const res = await fetch("http://localhost:8000/api/notes/compile", {
+      const res = await authFetch(`${getApiBase()}/api/notes/compile`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ latex_code: latexCode })
@@ -125,6 +127,21 @@ export default function NotesView({
           </div>
         )}
 
+        {notesLoading && (
+          <div className="w-full bg-slate-800/50 rounded-full h-1.5 mb-6 relative overflow-hidden">
+            <div className="absolute top-0 left-0 bg-gradient-to-r from-purple-600 to-emerald-400 h-1.5 rounded-full shadow-[0_0_10px_purple] transition-all" style={{ animation: 'fillProgress 30s ease-out forwards' }}></div>
+            <style>{`
+              @keyframes fillProgress {
+                0% { width: 0%; }
+                20% { width: 45%; }
+                50% { width: 75%; }
+                80% { width: 88%; }
+                100% { width: 95%; }
+              }
+            `}</style>
+          </div>
+        )}
+
         <div className="max-h-[65vh] overflow-y-auto pr-4 custom-scrollbar">
           {notesNotebook ? (
             notesFormat === "latex" ? (
@@ -172,7 +189,27 @@ export default function NotesView({
                 </div>
               </div>
             ) : (
-            <div className="prose prose-invert max-w-none leading-relaxed prose-headings:text-purple-300 prose-a:text-emerald-400 prose-blockquote:border-purple-500 prose-blockquote:bg-purple-500/10 prose-blockquote:py-1">
+            <div className="prose prose-invert max-w-none 
+                prose-headings:text-purple-400 prose-headings:font-bold 
+                prose-h1:border-b prose-h1:border-slate-800 prose-h1:pb-3 prose-h1:text-3xl
+                prose-h2:text-2xl prose-h2:mt-12 prose-h2:mb-6 prose-h2:border-b prose-h2:border-purple-500/20 prose-h2:pb-2
+                prose-h3:text-purple-300 prose-h3:text-xl prose-h3:mt-10 prose-h3:mb-4
+                prose-h4:text-emerald-400 prose-h4:text-lg prose-h4:mt-8 prose-h4:mb-3
+                prose-a:text-emerald-400 hover:prose-a:text-emerald-300
+                prose-strong:text-emerald-400 prose-strong:font-bold
+                prose-em:text-violet-300
+                prose-blockquote:border-l-4 prose-blockquote:border-l-purple-500 prose-blockquote:bg-purple-500/10 prose-blockquote:px-5 prose-blockquote:py-4 prose-blockquote:rounded-r-xl prose-blockquote:not-italic prose-blockquote:shadow-lg hover:prose-blockquote:bg-purple-500/20 prose-blockquote:transition-all prose-blockquote:text-slate-200 prose-blockquote:my-8
+                prose-table:w-full prose-table:overflow-hidden prose-table:rounded-2xl prose-table:shadow-2xl prose-table:border prose-table:border-purple-500/20 prose-table:border-collapse prose-table:my-10 prose-table:bg-slate-900/50 hover:prose-table:border-purple-500/50 hover:prose-table:shadow-purple-500/10 prose-table:transition-all prose-table:duration-500
+                prose-th:bg-gradient-to-r prose-th:from-purple-700/90 prose-th:to-purple-500/90 prose-th:p-5 prose-th:text-left prose-th:text-white prose-th:font-extrabold prose-th:tracking-wider prose-th:uppercase prose-th:text-sm prose-th:border prose-th:border-slate-600/60
+                prose-td:px-5 prose-td:py-4 prose-td:border prose-td:border-slate-600/50 prose-td:text-slate-200
+                prose-tr:even:bg-slate-800/50 prose-tr:odd:bg-transparent
+                prose-tr:hover:bg-slate-700/50 prose-tr:transition-colors
+                prose-li:marker:text-purple-500 prose-li:my-3 prose-li:text-slate-200
+                prose-p:my-5 prose-p:text-slate-200
+                prose-code:text-pink-400 prose-code:bg-pink-500/10 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded-md prose-code:font-mono prose-code:text-sm prose-code:font-semibold prose-code:before:content-none prose-code:after:content-none
+                prose-pre:bg-slate-900 prose-pre:border prose-pre:border-white/10 prose-pre:shadow-lg
+                prose-hr:border-slate-800 prose-hr:my-10
+                text-slate-200 leading-loose text-[1.05rem] tracking-wide">
               {notesNotebook.cells?.map((cell: any, idx: number) => {
                 const cellText = Array.isArray(cell.source) ? cell.source.join("") : String(cell.source);
                 const sanitizedCellText = cellText
@@ -181,10 +218,35 @@ export default function NotesView({
                   .filter((line: string) => !/^\s*Segment\s*\(.*\)/i.test(line))
                   .join("\n");
                 return (
-                  <div key={idx} className="notebook-cell bg-black/20 p-5 rounded-xl border border-white/5 mb-4 shadow-sm hover:border-purple-500/30 transition-colors">
+                  <div key={idx} className="notebook-cell bg-slate-950/40 p-1 md:p-3 mb-6 shadow-sm">
                     <ReactMarkdown
                       remarkPlugins={[remarkMath, remarkGfm]}
-                      rehypePlugins={[rehypeKatex]}
+                      rehypePlugins={[rehypeKatex, rehypeRaw] as any}
+                      components={({
+                        card: ({node, children, ...props}: any) => (
+                          <div className="bg-gradient-to-br from-slate-800/60 to-slate-900/80 border border-slate-700/50 p-6 my-6 rounded-2xl shadow-xl hover:shadow-indigo-500/20 hover:border-indigo-400/30 transition-all duration-300 [&>p:first-child]:mt-0 [&>p:last-child]:mb-0 [&>ul]:m-0 [&>ol]:m-0 [&_li]:my-1" {...props}>
+                            {children}
+                          </div>
+                        ),
+                        tip: ({node, children, ...props}: any) => (
+                          <div className="bg-violet-950/40 border-l-4 border-violet-500 p-6 my-6 rounded-r-xl shadow-xl hover:shadow-violet-500/10 transition-all duration-300 [&>p:first-child]:mt-0 [&>p:last-child]:mb-0 [&>ul]:m-0 [&>ol]:m-0 [&_li]:my-1" {...props}>
+                            <div className="text-violet-300 font-extrabold mb-3 flex items-center gap-2 text-lg">💡 Pro Tip</div>
+                            <div className="text-slate-200">{children}</div>
+                          </div>
+                        ),
+                        warning: ({node, children, ...props}: any) => (
+                          <div className="bg-red-950/40 border-l-4 border-red-500 p-6 my-6 rounded-r-xl shadow-xl hover:shadow-red-500/10 transition-all duration-300 [&>p:first-child]:mt-0 [&>p:last-child]:mb-0 [&>ul]:m-0 [&>ol]:m-0 [&_li]:my-1" {...props}>
+                            <div className="text-red-400 font-extrabold mb-3 flex items-center gap-2 text-lg">⚠️ Warning</div>
+                            <div className="text-slate-200">{children}</div>
+                          </div>
+                        ),
+                        important: ({node, children, ...props}: any) => (
+                          <div className="bg-emerald-950/40 border-l-4 border-emerald-500 p-6 my-6 rounded-r-xl shadow-xl hover:shadow-emerald-500/10 transition-all duration-300 [&>p:first-child]:mt-0 [&>p:last-child]:mb-0 [&>ul]:m-0 [&>ol]:m-0 [&_li]:my-1" {...props}>
+                            <div className="text-emerald-400 font-extrabold mb-3 flex items-center gap-2 text-lg">🎯 Important Concept</div>
+                            <div className="text-slate-200">{children}</div>
+                          </div>
+                        ),
+                      } as any)}
                     >
                       {normalizeMathMarkdown(sanitizedCellText, videoId ?? "")}
                     </ReactMarkdown>

@@ -1,7 +1,42 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowRight, Video, FileText, Zap } from "lucide-react";
+import { ensureAuthSession, isAuthenticated } from "../lib/auth";
 
 export default function LandingPage() {
+  const router = useRouter();
+  const [isChecking, setIsChecking] = useState(true);
+
+  useEffect(() => {
+    const bootstrap = async () => {
+      const hasToken = await ensureAuthSession();
+      const isMember = localStorage.getItem("vidsage_returning_user");
+      if (isMember === "true" && hasToken) {
+        router.replace("/dashboard");
+      } else {
+        setIsChecking(false);
+      }
+    };
+    void bootstrap();
+  }, [router]);
+
+  const handleStartLearning = () => {
+    if (!isAuthenticated()) {
+      router.push("/login");
+      return;
+    }
+
+    localStorage.setItem("vidsage_returning_user", "true");
+    router.push("/dashboard");
+  };
+
+  if (isChecking) {
+    return <div className="min-h-screen bg-slate-950" />;
+  }
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-amber-500/30">
       {/* Navigation */}
@@ -12,12 +47,12 @@ export default function LandingPage() {
           </div>
           <span className="text-2xl font-extrabold tracking-tight text-white drop-shadow-md">VidSage</span>
         </div>
-        <Link
-          href="/dashboard"
+        <button
+          onClick={() => router.push(isAuthenticated() ? "/dashboard" : "/login")}
           className="px-6 py-2.5 bg-slate-800 hover:bg-slate-700 text-amber-50 border border-white/10 hover:border-amber-500/30 rounded-full font-semibold transition-all shadow-xl hover:shadow-amber-500/10"
         >
-          Open Dashboard
-        </Link>
+          {isAuthenticated() ? "Open Dashboard" : "Login"}
+        </button>
       </header>
 
       {/* Hero Section */}
@@ -40,14 +75,28 @@ export default function LandingPage() {
             Transform long YouTube videos, lectures, and meetings into interactive knowledge graphs, seamless transcripts, and intelligent chat interfaces.
           </p>
 
+          <div className="mx-auto w-full max-w-xl rounded-2xl border border-white/10 bg-slate-900/50 p-5 backdrop-blur-sm">
+            <p className="text-sm text-slate-300">
+              Authentication is enabled. Sign in first, then continue to your dashboard.
+            </p>
+            <div className="mt-3 flex justify-center">
+              <Link
+                href="/login"
+                className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-400"
+              >
+                Go to Login
+              </Link>
+            </div>
+          </div>
+
           <div className="pt-8 flex justify-center">
-            <Link
-              href="/dashboard"
+            <button
+              onClick={handleStartLearning}
               className="group relative px-8 py-4 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-900 rounded-full font-bold text-lg transition-all shadow-[0_0_40px_rgba(245,158,11,0.3)] hover:shadow-[0_0_60px_rgba(245,158,11,0.5)] overflow-hidden flex items-center gap-3"
             >
-              <span>Start Learning Now</span>
+              <span>Get Started Now</span>
               <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-            </Link>
+            </button>
           </div>
         </div>
 

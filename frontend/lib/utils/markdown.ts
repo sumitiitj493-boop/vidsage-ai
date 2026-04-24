@@ -26,6 +26,15 @@ export const normalizeMathMarkdown = (text: string, videoId?: string) => {
     .replace(/\\\[([\s\S]+?)\\\]/g, (_match: string, expr: string) => `\n\n$$\n${String(expr).trim()}\n$$\n\n`)
     .replace(/\\\(([\s\S]+?)\\\)/g, (_match: string, expr: string) => `$${String(expr).trim()}$`);
 
+  // Fix bare LaTeX environments (like \begin{aligned}) that aren't wrapped in $$.
+  // First, strip any existing $$ wrap directly around \begin to prevent double-wrapping.
+  cleaned = cleaned.replace(/\$\$\s*(\\begin\{(?:aligned|equation|pmatrix|bmatrix|vmatrix|Vmatrix|cases|eqnarray|align|matrix)\}[^$]+?\\end\{\1\})\s*\$\$/g, "$1");
+  // Then, uniformly wrap all \begin{}...\end{} environments in $$ blocks.
+  cleaned = cleaned.replace(
+    /(\\begin\{(?:aligned|equation|pmatrix|bmatrix|vmatrix|Vmatrix|cases|eqnarray|align|matrix)\}[^$]+?\\end\{\1\})/g,
+    "\n\n$$\n$1\n$$\n\n"
+  );
+
   return cleaned;
 };
 

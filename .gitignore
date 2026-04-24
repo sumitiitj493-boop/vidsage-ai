@@ -19,7 +19,9 @@ Thumbs.db
 # RAG & Data
 chroma_db/
 **/chroma_db/
+app/uploads/
 backend/app/uploads/
+backend/app/downloads/
 backend/chroma_db/
 
 # IDE

@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { ChatMessage, ChatSession } from "../lib/types/dashboard";
+import { authFetch } from "../lib/auth";
 
 export function useChat(videoId: string | undefined | null, videoTitle?: string) {
   const [chatQuestion, setChatQuestion] = useState("");
@@ -86,7 +87,7 @@ export function useChat(videoId: string | undefined | null, videoTitle?: string)
     setChatAnswer("");
 
     try {
-      const res = await fetch(`${apiBase}/api/chat/ask/stream`, {
+      const res = await authFetch(`${apiBase}/api/chat/ask/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ video_id: videoId, question, format: chatOutputMode, language: chatLanguage }),

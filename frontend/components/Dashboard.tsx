@@ -1,6 +1,8 @@
 ﻿"use client";
 
-import { useState, useMemo, useRef } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
+import { useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import remarkGfm from "remark-gfm";
@@ -18,19 +20,44 @@ import DashboardHeader from "./dashboard/Header";
 import DashboardSidebar from "./dashboard/Sidebar";
 import ProgressView from "./dashboard/ProgressView";
 import TranscriptView from "./dashboard/TranscriptView";
-import NotesView from "./dashboard/NotesView";
-import ChatWindow from "./dashboard/ChatWindow";
 import LandingView from "./dashboard/LandingView";
 import ProcessingLoader from "./dashboard/ProcessingLoader";
-import MindMapView from "./dashboard/MindMapView";
-import SummaryView from "./dashboard/SummaryView";
-
 import HistoryModal from "./dashboard/HistoryModal";
+import { ensureAuthSession, logout } from "../lib/auth";
+
+const NotesView = dynamic(() => import("./dashboard/NotesView"), {
+  ssr: false,
+  loading: () => <div className="p-6 text-sm text-slate-400">Loading notes workspace...</div>,
+});
+
+const ChatWindow = dynamic(() => import("./dashboard/ChatWindow"), {
+  ssr: false,
+  loading: () => <div className="p-6 text-sm text-slate-400">Loading assistant...</div>,
+});
+
+const MindMapView = dynamic(() => import("./dashboard/MindMapView"), {
+  ssr: false,
+  loading: () => <div className="p-6 text-sm text-slate-400">Loading mind map tools...</div>,
+});
+
+const SummaryView = dynamic(() => import("./dashboard/SummaryView"), {
+  ssr: false,
+  loading: () => <div className="p-6 text-sm text-slate-400">Loading summary engine...</div>,
+});
 
 export default function Dashboard() {
+  const router = useRouter();
+  
+  // Call ALL hooks unconditionally at top level - NEVER inside conditionals
   const processor = useVideoProcessor();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
+  const [chatFullScreen, setChatFullScreen] = useState(false);
+  const [fullScreenTutorMode, setFullScreenTutorMode] = useState(false);
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isAuthChecked, setIsAuthChecked] = useState(false);
+  const [isAuthorized, setIsAuthorized] = useState(false);
 
   // Extract standardized videoId to pass to other hooks
   const videoId = useMemo(() => {
@@ -52,10 +79,42 @@ export default function Dashboard() {
   const chat = useChat(videoId, videoTitle);
   const notes = useNotes(videoId, videoTitle, processor.activeMode);
 
-  const [chatFullScreen, setChatFullScreen] = useState(false);
-  const [fullScreenTutorMode, setFullScreenTutorMode] = useState(false);
-  const [isChatOpen, setIsChatOpen] = useState(false);
-  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  // Check auth on mount
+  useEffect(() => {
+    const checkAuth = async () => {
+      const hasToken = await ensureAuthSession();
+      if (!hasToken) {
+        router.replace("/login");
+      } else {
+        setIsAuthorized(true);
+      }
+      setIsAuthChecked(true);
+    };
+
+    void checkAuth();
+  }, [router]);
+
+  const handleLogout = async () => {
+    await logout();
+    localStorage.removeItem("vidsage_returning_user");
+    router.replace("/login");
+  };
+
+  // Don't render UI until auth check is complete
+  if (!isAuthChecked) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <div className="text-slate-300 text-center">
+          <div className="w-10 h-10 border-2 border-slate-600 border-t-amber-500 rounded-full animate-spin mx-auto mb-4"></div>
+          <p>Verifying authentication...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthorized) {
+    return null;
+  }
 
   const renderMarkdownAnswer = (text: string) => (
     <div className="prose prose-invert max-w-none whitespace-pre-wrap leading-relaxed">
@@ -127,6 +186,7 @@ export default function Dashboard() {
           resetSession={processor.resetSession}
           fileInputRef={{ current: null } as any} audioInputRef={{ current: null } as any}
           onOpenHistory={() => setIsHistoryOpen(true)}
+          onLogout={handleLogout}
         />
 
         <main className="flex-1 overflow-y-auto px-6 pb-10 custom-scrollbar">

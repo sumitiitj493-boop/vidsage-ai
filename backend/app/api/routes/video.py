@@ -156,21 +156,49 @@ async def download_video(request: VideoRequest):
                     rag_service.index_video(video_id, youtube_result["segments"])
                     
                     return {
+                        "success": True,
+                        "source": "youtube_auto",
+                        "video_id": video_id,
+                        "processing_time_seconds": round(time.time() - start_time, 2),
+                        "routing": "auto_validated",
+                        "quality_check": validation_result,
+                        "raw_text": youtube_result["text"],
+                        "cleaned_text": cleaned["cleaned_text"],
+                        "cleaning_steps": cleaned["cleaning_steps"],
+                        "segments": youtube_result["segments"]
+                    }
+            
+                # IF VALIDATION COMPLETED AND FAILED (and not forced)
+                logger.warning(f"Topic Validation Failed: {validation_result.get('reason')}. Prompting user to try Whisper.")
+                return {
                     "success": True,
-                    "source": "youtube_auto",
+                    "requires_whisper": True,
+                    "source": "youtube_auto_rejected",
                     "video_id": video_id,
                     "processing_time_seconds": round(time.time() - start_time, 2),
-                    "routing": "auto_validated",
+                    "routing": "auto_rejected",
                     "quality_check": validation_result,
-                    "raw_text": youtube_result["text"],
-                    "cleaned_text": cleaned["cleaned_text"],
-                    "cleaning_steps": cleaned["cleaning_steps"],
-                    "segments": youtube_result["segments"]
+                    "raw_text": f"# ⚠️ Auto-Transcript Rejected\n\nOur system detected an automatically generated YouTube transcript for **{video_title}**, but it was rejected for the following reason:\n\n> {validation_result.get('reason', 'Topic mismatch.')}\n\n**To get a highly accurate transcript, please click the \"Try Whisper AI\" button in the Sidebar.**",
+                    "cleaned_text": f"# ⚠️ Auto-Transcript Rejected\n\nOur system detected an automatically generated YouTube transcript for **{video_title}**, but it was rejected for the following reason:\n\n> {validation_result.get('reason', 'Topic mismatch.')}\n\n**To get a highly accurate transcript, please click the \"Try Whisper AI\" button in the Sidebar.**",
+                    "segments": []
                 }
-            
-            logger.warning(f"Topic Validation Failed: {validation_result.get('reason')}. Switching to Whisper.")
 
-        # 3️ Fallback → Download & Whisper (SLOW PATH)
+        elif not request.force_whisper:
+            # No YouTube transcript found and force_whisper is False
+            logger.warning("No YouTube transcript found. Prompting user to try Whisper.")
+            return {
+                "success": True,
+                "requires_whisper": True,
+                "source": "no_transcript",
+                "video_id": video_id,
+                "processing_time_seconds": round(time.time() - start_time, 2),
+                "routing": "no_youtube_transcript",
+                "raw_text": f"# ⚠️ No Transcript Available\n\nYouTube does not have any captions or transcripts available for **{video_title}**.\n\n**To generate one from scratch, please click the \"Try Whisper AI\" button in the Sidebar.**",
+                "cleaned_text": f"# ⚠️ No Transcript Available\n\nYouTube does not have any captions or transcripts available for **{video_title}**.\n\n**To generate one from scratch, please click the \"Try Whisper AI\" button in the Sidebar.**",
+                "segments": []
+            }
+
+        # 3️ Fallback → Download & Whisper (SLOW PATH - Only executes if force_whisper is True)
         logger.info("Downloading audio for Whisper...")
         downloader = VideoDownloaderService()
 

@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import { NotesFormat } from "../lib/types/dashboard";
 import { stripEmojis, keepEnglishOnly } from "../lib/utils/formatters";
 import { convertMarkdownToHtmlStr, normalizeMathMarkdown } from "../lib/utils/markdown";
+import { authFetch } from "../lib/auth";
 
 export function useNotes(videoId: string | undefined | null, videoTitle: string, activeMode: string) {
   const [notesNotebook, setNotesNotebook] = useState<any | null>(null);
@@ -23,7 +24,7 @@ export function useNotes(videoId: string | undefined | null, videoTitle: string,
     setNotesError(null);
 
     try {
-      const res = await fetch(`${apiBase}/api/notes/masterclass`, {
+      const res = await authFetch(`${apiBase}/api/notes/masterclass`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ video_id: videoId, output_format: notesFormat }),
@@ -132,14 +133,18 @@ export function useNotes(videoId: string | undefined | null, videoTitle: string,
     
     @media print {
       body { padding: 0; background-color: white; }
-      .notes-container { max-width: 100%; }
+      .notes-container { max-width: 100%; top: 0 !important; margin: 0 !important; }
       .notebook-cell { border: none; padding: 0; margin-bottom: 30px; box-shadow: none; page-break-inside: avoid; }
       .notes-header { box-shadow: none; border-left: 4px solid #a371f7; background: #f6f8fa; }
       .notes-header h1 { color: #000; }
+      .no-print { display: none !important; }
     }
   </style>
 </head>
 <body>
+  <div class="no-print" style="position: sticky; top: 0; z-index: 50; padding: 16px; background: rgba(13, 17, 23, 0.95); backdrop-filter: blur(10px); border-bottom: 1px solid #30363d; display: flex; justify-content: flex-end; margin-bottom: 24px;">
+    <button onclick="window.print()" style="background: #a371f7; color: white; border: none; padding: 10px 20px; font-size: 14px; font-weight: 600; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 12px rgba(163, 113, 247, 0.3); transition: all 0.2s;">🖨️ Print / Save as PDF</button>
+  </div>
   <div class="notes-container">
     <div class="notes-header">
       <h1>🚀 Masterclass Notes</h1>
@@ -161,7 +166,6 @@ export function useNotes(videoId: string | undefined | null, videoTitle: string,
         if (!cell || cell.cell_type !== "markdown") return "";
         let text = Array.isArray(cell.source) ? cell.source.join("") : String(cell.source);
         text = stripEmojis(text);
-        text = keepEnglishOnly(text);
 
         // Simple LaTeX markup conversions
         text = text.replace(/^######\s*(.+)$/gm, "\\subsubsubsection{$1}");
@@ -177,6 +181,12 @@ export function useNotes(videoId: string | undefined | null, videoTitle: string,
         text = text.replace(/__(.*?)__/g, "\\textbf{$1}");
         text = text.replace(/_(.*?)_/g, "\\textit{$1}");
 
+        // XML Tags
+        text = text.replace(/<card>([\s\S]*?)<\/card>/g, "\\begin{tcolorbox}[colback=blue!5!white,colframe=blue!75!black,title=Explanation]\n$1\n\\end{tcolorbox}");
+        text = text.replace(/<tip>([\s\S]*?)<\/tip>/g, "\\begin{tcolorbox}[colback=purple!5!white,colframe=purple!75!black,title=Pro Tip]\n$1\n\\end{tcolorbox}");
+        text = text.replace(/<warning>([\s\S]*?)<\/warning>/g, "\\begin{tcolorbox}[colback=red!5!white,colframe=red!75!black,title=Warning]\n$1\n\\end{tcolorbox}");
+        text = text.replace(/<important>([\s\S]*?)<\/important>/g, "\\begin{tcolorbox}[colback=green!5!white,colframe=green!75!black,title=Important Concept]\n$1\n\\end{tcolorbox}");
+
         // Basic inline formula parsing (if present)
         text = text.replace(/\$\$(.*?)\$\$/g, "\\[ $1 \\]"); // Block
         text = text.replace(/\$(.*?)\$/g, "\\($1\\)"); // Inline
@@ -184,13 +194,43 @@ export function useNotes(videoId: string | undefined | null, videoTitle: string,
         const lines = text.split("\n");
         let inItemize = false;
         let inBlockquote = false;
+        let inTable = false;
         const out = [];
         for (let rawLine of lines) {
           const trimmed = rawLine.trim();
           if (!trimmed) {
             if (inItemize) { out.push("\\end{itemize}"); inItemize = false; }
             if (inBlockquote) { out.push("\\end{tcolorbox}"); inBlockquote = false; }
+            if (inTable) { out.push("\\end{tabular}\\n\\end{center}\\n\\end{table}"); inTable = false; }
             out.push(""); continue;
+          }
+
+          // Table parser simple
+          if (trimmed.startsWith("|") && trimmed.endsWith("|")) {
+            if (inItemize) { out.push("\\end{itemize}"); inItemize = false; }
+            if (inBlockquote) { out.push("\\end{tcolorbox}"); inBlockquote = false; }
+            
+            const cols = trimmed.split("|").slice(1, -1).map(c => c.trim());
+            // is it a separator row?
+            const isSeparator = cols.every(c => /^[\\s:-—-]*$/.test(c.replace(/—/g, '-')));
+            
+            if (!inTable) {
+              if (isSeparator) continue; // ignore leading separator without header
+              inTable = true;
+              const formatStr = cols.map(() => "l").join("|");
+              out.push("\\begin{table}[h!]\\n\\begin{center}\\n\\begin{tabular}{|" + formatStr + "|}");
+              out.push("\\hline");
+              out.push(cols.join(" & ") + " \\\\ \\hline");
+            } else {
+              if (isSeparator) {
+                 // out.push("\\hline"); 
+              } else {
+                 out.push(cols.join(" & ") + " \\\\ \\hline");
+              }
+            }
+            continue;
+          } else {
+            if (inTable) { out.push("\\end{tabular}\\n\\end{center}\\n\\end{table}"); inTable = false; }
           }
           
           const bqMatch = trimmed.match(/^>\s*(.*)$/);
@@ -217,11 +257,12 @@ export function useNotes(videoId: string | undefined | null, videoTitle: string,
         }
         if (inItemize) out.push("\\end{itemize}");
         if (inBlockquote) out.push("\\end{tcolorbox}");
+        if (inTable) out.push("\\end{tabular}\\n\\end{center}\\n\\end{table}");
         return out.join("\n");
       })
       .join("\n\n");
 
-    const safeTitle = keepEnglishOnly(stripEmojis(videoTitle || "Notes"));
+    const safeTitle = stripEmojis(videoTitle || "Notes").replace(/([&%$#_{}~^\\])/g, '\\$1');
     const fancyPreamble = `\\documentclass{article}
 \\usepackage[margin=1in]{geometry}
 \\usepackage{amsmath,amssymb}
@@ -324,7 +365,7 @@ export function useNotes(videoId: string | undefined | null, videoTitle: string,
     if (!notesNotebook || !videoId) return;
     try {
       const latex_code = getNotesLatex();
-      const response = await fetch("http://localhost:8000/api/notes/compile", {
+      const response = await authFetch(`${apiBase}/api/notes/compile`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ latex_code: latex_code })
