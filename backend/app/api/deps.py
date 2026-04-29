@@ -20,6 +20,7 @@ class _LazyTranscriptionService:
                     self._instance = TranscriptionService(
                         model_size=settings.WHISPER_MODEL_SIZE,
                         device=settings.WHISPER_DEVICE,
+                        compute_type=settings.WHISPER_COMPUTE_TYPE,
                     )
         return self._instance
 

@@ -15,6 +15,10 @@ export interface ChatSession {
   title: string;
   updatedAt: number;
   messages: ChatMessage[];
+  // Optional persisted extras for saved sessions
+  transcript?: string | null;
+  suggestedQuestions?: string[];
+  saved?: boolean;
 }
 
 export type InputMode = "youtube" | "pdf" | "audio";

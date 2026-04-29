@@ -158,6 +158,7 @@ export default function Dashboard() {
             setIsChatOpen(true);
           }}
           onDeleteSession={chat.deleteSessionHistory}
+          onSaveSession={chat.toggleSaveSession}
         />
       </>
     );
@@ -212,6 +213,8 @@ export default function Dashboard() {
                   inputMode={processor.inputMode} activeMode={processor.activeMode} setActiveMode={processor.setActiveMode}
                   isProcessing={processor.isProcessing} handleForceWhisper={() => processor.processVideo({ forceWhisper: true })}
                   transcriptLength={processor.transcriptText.length} audioJobId={processor.audioJobId} audioStatus={processor.audioStatus}
+                  isSaved={videoId ? !!chat.allSessions[videoId]?.saved : false}
+                  onToggleSave={() => { if (videoId) chat.toggleSaveSession(videoId); }}
                 />
               </div>
 
@@ -321,6 +324,7 @@ export default function Dashboard() {
           setIsChatOpen(true);
         }}
         onDeleteSession={chat.deleteSessionHistory}
+        onSaveSession={chat.toggleSaveSession}
       />
     </div>
   );

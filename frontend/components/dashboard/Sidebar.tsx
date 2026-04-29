@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
-import { Copy, ExternalLink, Download, Play, Pause } from "lucide-react";
+import Image from "next/image";
+import { Copy, ExternalLink, Download, Play, Pause, Bookmark, BookmarkCheck } from "lucide-react";
 import { InputMode, ActiveMode } from "../../lib/types/dashboard";
 import { truncateMiddle } from "../../lib/utils/formatters";
 import { authFetch, getApiBase } from "../../lib/auth";
@@ -16,11 +17,14 @@ interface SidebarProps {
   transcriptLength: number;
   audioJobId: string | null;
   audioStatus: string | null;
+  isSaved?: boolean;
+  onToggleSave?: () => void;
 }
 
 export default function DashboardSidebar({
   videoId, videoTitle, source, inputMode, activeMode, setActiveMode,
-  isProcessing, handleForceWhisper, transcriptLength, audioJobId, audioStatus
+  isProcessing, handleForceWhisper, transcriptLength, audioJobId, audioStatus,
+  isSaved, onToggleSave
 }: SidebarProps) {
   const [copyHint, setCopyHint] = useState("");
   const [ytDetails, setYtDetails] = useState<{ title: string; author_name: string } | null>(null);
@@ -89,11 +93,17 @@ export default function DashboardSidebar({
     }
   };
 
+  const handleToggleSave = () => {
+    if (onToggleSave) {
+      onToggleSave();
+    }
+  };
+
   const displayTitle = ytDetails?.title || videoTitle || (inputMode === "youtube" ? "YouTube Video" : "Uploaded File");
   const authorName = ytDetails?.author_name || "";
 
   return (
-    <aside className="space-y-6 h-full flex flex-col">
+    <aside className="space-y-6 h-full flex flex-col relative">
       {/* Video Hero Card */}
       <div className="rounded-3xl border border-white/10 bg-slate-900/50 backdrop-blur-3xl shadow-2xl shadow-black/50 overflow-hidden flex-shrink-0 relative group">
         {inputMode === "youtube" ? (
@@ -109,16 +119,26 @@ export default function DashboardSidebar({
                 onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
               />
             )}
-            <img
-              src={`https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`}   
-              onError={(e) => {
-                 (e.currentTarget as HTMLImageElement).src = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
-              }}
+            <Image
+              src={`https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`}
               alt="YouTube thumbnail"
-              className="absolute inset-0 h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
+              fill
+              sizes="(max-width: 768px) 100vw, 300px"
+              unoptimized
+              className="object-cover transition-transform duration-700 group-hover:scale-105"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-900/60 to-transparent" />
             <div className="absolute top-3 right-3 flex gap-2">
+              <button
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleToggleSave();
+                }}
+                className={`bg-black/40 hover:bg-amber-500/80 p-2 rounded-full backdrop-blur-md transition-colors ${isSaved ? 'text-amber-400 font-bold' : 'text-white'}`}
+                title={isSaved ? "Saved for Later" : "Save for Later"}
+              >
+                {isSaved ? <span className="text-xs font-semibold">Saved</span> : <Bookmark className="w-4 h-4" />}
+              </button>
               <button
                 onClick={() => {
                   if (audioBlobUrl) {

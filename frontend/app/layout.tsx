@@ -2,7 +2,7 @@ import "./globals.css";
 
 export const metadata = {
   title: "VidSage",
-  description: "AI-powered quiz generator",
+  description: "AI-powered video learning assistant",
 };
 
 export default function RootLayout({

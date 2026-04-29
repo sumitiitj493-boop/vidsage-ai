@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import remarkGfm from "remark-gfm";
@@ -21,7 +21,7 @@ export default function SummaryView({ videoId }: SummaryViewProps) {
 
   const cacheKey = videoId ? `vidsage_summary_${videoId}` : null;
 
-  const fetchSummary = async () => {
+  const fetchSummary = useCallback(async () => {
     if (!videoId) return;
     setLoading(true);
     setError(null);
@@ -42,7 +42,7 @@ export default function SummaryView({ videoId }: SummaryViewProps) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [videoId, cacheKey]);
 
   const handleDownloadObjectUrl = () => {
     if (!summary) return;
@@ -137,7 +137,7 @@ export default function SummaryView({ videoId }: SummaryViewProps) {
     if (!summary && !loading && !error) {
       fetchSummary();
     }
-  }, [videoId, cacheKey, summary, loading, error]);
+  }, [videoId, cacheKey, summary, loading, error, fetchSummary]);
 
   if (!videoId) {
     return (

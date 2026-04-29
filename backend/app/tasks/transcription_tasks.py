@@ -1,18 +1,35 @@
 from app.celery_app import celery
 from app.api.deps import transcription_service
 from app.services.job_manager import job_manager
+from app.services.video_downloader import VideoDownloaderService
 from app.utils.audio_preprocess import preprocess_audio
 import os
 
 
-def _perform_job(job_id: str, file_path: str, force_whisper: bool = False):   
+def _set_stage(job_id: str, status: str, progress: int):
+    job_manager.update_status(job_id, status)
+    try:
+        job = job_manager.get_job(job_id) or {}
+        elapsed = float(job.get("elapsed") or 0)
+        estimated = float(job.get("estimated") or elapsed)
+        job_manager.update_progress(job_id, progress, elapsed, estimated)
+    except Exception:
+        pass
+
+
+def _perform_job(
+    job_id: str,
+    file_path: str,
+    force_whisper: bool = False,
+    video_id_override: str | None = None,
+):
     """Core transcription pipeline used by the Celery worker."""
     job_manager.update_file_path(job_id, file_path)
-    job_manager.update_status(job_id, "preprocessing")
+    _set_stage(job_id, "preprocessing", 10)
 
     # prepare audio
     preprocessed = preprocess_audio(file_path, enhance_audio=force_whisper)
-    job_manager.update_status(job_id, "transcribing")
+    _set_stage(job_id, "transcribing", 20)
 
     # transcription with progress reporting
     import time as _time
@@ -51,7 +68,9 @@ def _perform_job(job_id: str, file_path: str, force_whisper: bool = False):
             print(f"[Transcription {job_id}] 100% done | elapsed {elapsed:.1f}s", flush=True)
 
         try:
-            job_manager.update_progress(job_id, percent, elapsed, est_left if percent < 100 else elapsed)
+            # Keep space for non-transcription phases by mapping 0..100 -> 20..95
+            mapped_percent = 20 + int(percent * 0.75)
+            job_manager.update_progress(job_id, mapped_percent, elapsed, est_left if percent < 100 else elapsed)
         except Exception:
             pass
 
@@ -65,19 +84,22 @@ def _perform_job(job_id: str, file_path: str, force_whisper: bool = False):
         os.remove(preprocessed)
 
     # cleaning step
-    job_manager.update_status(job_id, "cleaning")
+    _set_stage(job_id, "cleaning", 96)
     from app.services.transcript_cleaner import TranscriptCleaner
     import asyncio
     cleaned = asyncio.run(TranscriptCleaner.clean(result.text, use_llm=False))
-    job_manager.update_status(job_id, "indexing")
+    _set_stage(job_id, "indexing", 98)
 
     segments_data = [
         {"start": s.start, "end": s.end, "text": s.text}
         for s in result.segments
     ]
 
+    output_video_id = video_id_override or job_id
+
     # Complete the job FIRST so the user gets the transcript immediately!
     job_manager.complete_job(job_id, {
+        "video_id": output_video_id,
         "raw_text": result.text,
         "cleaned_text": cleaned["cleaned_text"],
         "cleaning_steps": cleaned["cleaning_steps"],
@@ -87,7 +109,33 @@ def _perform_job(job_id: str, file_path: str, force_whisper: bool = False):
     })
 
     # Indexing in the background using a separate Celery task
-    index_video_task.delay(job_id, segments_data)
+    index_video_task.delay(output_video_id, segments_data)
+
+
+def _perform_youtube_whisper_job(
+    job_id: str,
+    video_url: str,
+    video_id: str,
+    output_format: str = "mp3",
+    quality: str = "192",
+):
+    """Download YouTube audio and run the same pipeline asynchronously."""
+    _set_stage(job_id, "downloading", 2)
+    downloader = VideoDownloaderService()
+    download_result = downloader._download_sync(
+        url=video_url,
+        output_format=output_format,
+        quality=quality,
+    )
+    downloaded_file = download_result["file_path"]
+    _set_stage(job_id, "queued", 5)
+
+    _perform_job(
+        job_id=job_id,
+        file_path=downloaded_file,
+        force_whisper=False,
+        video_id_override=video_id,
+    )
 
 
 @celery.task(bind=True)

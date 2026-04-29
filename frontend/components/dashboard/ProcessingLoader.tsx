@@ -40,7 +40,7 @@ export default function ProcessingLoader({
         
         <div className="mb-6">
           <div className="flex justify-between text-sm mb-2">
-            <span className="text-slate-300 capitalize">Status: <span className="font-semibold text-white">{audioStatus || "Connecting..."}</span></span>
+            <span className="text-slate-300 capitalize">Status: <span className="font-semibold text-white">{audioStatus || "queued"}</span></span>
             <span className="text-amber-400 font-mono text-lg">{percent}%</span>
           </div>
           <div className="w-full h-3 bg-slate-800 rounded-full overflow-hidden border border-white/5">
@@ -51,7 +51,7 @@ export default function ProcessingLoader({
           </div>
           <div className="flex justify-between text-xs text-slate-400 mt-2 font-mono">
             <span>Elapsed: {formattedElapsed}s</span>
-            <span>Est. Total: {formattedEstimated}s</span>
+            <span>Est. Left: {formattedEstimated}s</span>
           </div>
         </div>
         

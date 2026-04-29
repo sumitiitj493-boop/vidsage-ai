@@ -42,7 +42,9 @@ export function useVideoProcessor() {
         const rl = await result.json();
         if (rl.status === "completed") {
           const theData = rl.result;
-          theData.video_id = jobId;
+          if (!theData.video_id) {
+            theData.video_id = jobId;
+          }
           setDownloadState({ status: "done", response: theData });
           
           let rawText = "";
@@ -70,13 +72,29 @@ export function useVideoProcessor() {
           }
           setTranscriptText(rawText);
           setStage("ready");
-
+          try {
+            // cache transcript + suggestions locally so historical sessions can load full transcript
+            const cacheKey = "vidsage_transcripts";
+            const existing = JSON.parse(localStorage.getItem(cacheKey) || "{}");
+            existing[theData.video_id] = existing[theData.video_id] || {};
+            existing[theData.video_id].transcript = rawText;
+            localStorage.setItem(cacheKey, JSON.stringify(existing));
+          } catch {
+            // ignore storage errors
+          }
           try {
             const suggRes = await authFetch(`${apiBase}/api/chat/suggest/${jobId}`);
             if (suggRes.ok) {
               const suggData = await suggRes.json();
               if (Array.isArray(suggData.questions)) {
                 setSuggestedQuestions(suggData.questions);
+                try {
+                  const cacheKey = "vidsage_transcripts";
+                  const existing = JSON.parse(localStorage.getItem(cacheKey) || "{}");
+                  existing[theData.video_id] = existing[theData.video_id] || {};
+                  existing[theData.video_id].suggestedQuestions = suggData.questions;
+                  localStorage.setItem(cacheKey, JSON.stringify(existing));
+                } catch {}
               }
             }
           } catch {
@@ -87,9 +105,16 @@ export function useVideoProcessor() {
         return;
       }
 
+      if (data.status === "failed") {
+        const message = data.error || "Whisper transcription failed";
+        setDownloadState({ status: "error", error: message });
+        setStage("empty");
+        return;
+      }
+
       if (data.status && data.status !== "completed" && data.status !== "failed") {
-        // Poll every 5 seconds to reduce backend log spam
-        setTimeout(() => pollAudioStatus(jobId), 5000);
+        // Keep UI responsive with near real-time progress.
+        setTimeout(() => pollAudioStatus(jobId), 1200);
       }
     } catch {
       // ignore
@@ -125,6 +150,17 @@ export function useVideoProcessor() {
           throw new Error(errorData?.detail || errorData?.message || "Failed to process video");
         }
         data = await res.json();
+
+        if (data?.job_id) {
+          setAudioJobId(data.job_id);
+          setAudioStatus(data.status || "queued");
+          setAudioProgress(typeof data.progress === "number" ? data.progress : 0);
+          setAudioElapsed(0);
+          setAudioEstimated(null);
+          setActiveMode("progress");
+          pollAudioStatus(data.job_id);
+          return;
+        }
       } else if (inputMode === "pdf") {
         if (!pdfFile) throw new Error("Select a PDF file first.");
         const form = new FormData();
@@ -203,13 +239,33 @@ export function useVideoProcessor() {
       if (inputMode !== "audio") {
         setStage("ready");
       }
-
+      try {
+        // cache transcript for this video/pdf so history can show it later
+        const idKey = data.video_id || data.pdf_id || (data.job_id && data.job_id.toString());
+        if (idKey) {
+          const cacheKey = "vidsage_transcripts";
+          const existing = JSON.parse(localStorage.getItem(cacheKey) || "{}");
+          existing[idKey] = existing[idKey] || {};
+          existing[idKey].transcript = rawText;
+          localStorage.setItem(cacheKey, JSON.stringify(existing));
+        }
+      } catch {}
       try {
         const suggRes = await authFetch(`${apiBase}/api/chat/suggest/${data.video_id || data.pdf_id}`);
         if (suggRes.ok) {
           const suggData = await suggRes.json();
           if (Array.isArray(suggData.questions)) {
             setSuggestedQuestions(suggData.questions);
+            try {
+              const idKey = data.video_id || data.pdf_id || (data.job_id && data.job_id.toString());
+              if (idKey) {
+                const cacheKey = "vidsage_transcripts";
+                const existing = JSON.parse(localStorage.getItem(cacheKey) || "{}");
+                existing[idKey] = existing[idKey] || {};
+                existing[idKey].suggestedQuestions = suggData.questions;
+                localStorage.setItem(cacheKey, JSON.stringify(existing));
+              }
+            } catch {}
           }
         }
       } catch {
@@ -243,16 +299,31 @@ export function useVideoProcessor() {
   };
 
   const loadSession = (videoId: string, title?: string) => {
+    // Attempt to load cached transcript + suggestions from localStorage
+    let cachedTranscript = null;
+    let cachedSuggestions: string[] | undefined = undefined;
+    try {
+      const cacheKey = "vidsage_transcripts";
+      const existing = JSON.parse(localStorage.getItem(cacheKey) || "{}");
+      if (existing && existing[videoId]) {
+        cachedTranscript = existing[videoId].transcript || null;
+        cachedSuggestions = existing[videoId].suggestedQuestions;
+      }
+    } catch {
+      // ignore
+    }
+
     setDownloadState({ 
       status: "done", 
       response: {
         video_id: videoId,
         video_title: title || "Historical Session",
-        cleaned_text: "Transcript not cached for historical sessions. Please re-process the URL for the full transcript."
+        cleaned_text: cachedTranscript || "Transcript not cached for historical sessions. Please re-process the URL for the full transcript."
       } 
     });
     setStage("ready");
-    setTranscriptText("Transcript not cached for historical sessions. Please re-process the URL for the full transcript.");
+    setTranscriptText(cachedTranscript || "Transcript not cached for historical sessions. Please re-process the URL for the full transcript.");
+    setSuggestedQuestions(cachedSuggestions || []);
     setActiveMode("transcript");
   };
 

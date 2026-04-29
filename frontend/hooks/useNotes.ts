@@ -210,9 +210,9 @@ export function useNotes(videoId: string | undefined | null, videoTitle: string,
             if (inItemize) { out.push("\\end{itemize}"); inItemize = false; }
             if (inBlockquote) { out.push("\\end{tcolorbox}"); inBlockquote = false; }
             
-            const cols = trimmed.split("|").slice(1, -1).map(c => c.trim());
+            const cols = trimmed.split("|").slice(1, -1).map((c: string) => c.trim());
             // is it a separator row?
-            const isSeparator = cols.every(c => /^[\\s:-—-]*$/.test(c.replace(/—/g, '-')));
+            const isSeparator = cols.every((c: string) => /^[\\s:-—-]*$/.test(c.replace(/—/g, '-')));
             
             if (!inTable) {
               if (isSeparator) continue; // ignore leading separator without header

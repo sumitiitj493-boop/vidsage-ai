@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import mermaid from "mermaid";
 import { Loader2, AlertCircle, RefreshCw, Download, ZoomIn, ZoomOut, Maximize, Minimize } from "lucide-react";
 import { authFetch, getApiBase } from "../../lib/auth";
@@ -19,7 +19,7 @@ export default function MindMapView({ videoId }: MindMapViewProps) {
 
   const cacheKey = videoId ? `vidsage_mindmap_${videoId}` : null;
 
-  const fetchGraph = async () => {
+  const fetchGraph = useCallback(async () => {
     if (!videoId) return;
     setLoading(true);
     setError(null);
@@ -48,7 +48,7 @@ export default function MindMapView({ videoId }: MindMapViewProps) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [videoId, cacheKey]);
 
   const renderMermaid = async (code: string) => {
     try {
@@ -98,7 +98,7 @@ export default function MindMapView({ videoId }: MindMapViewProps) {
     if (!graphCode && !loading && !error) {
       fetchGraph();
     }
-  }, [videoId, cacheKey, graphCode, loading, error]);
+  }, [videoId, cacheKey, graphCode, loading, error, fetchGraph]);
 
   if (!videoId) {
     return (

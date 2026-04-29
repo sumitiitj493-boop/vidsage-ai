@@ -17,6 +17,46 @@ export function useChat(videoId: string | undefined | null, videoTitle?: string)
 
   const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
+  const readTranscriptCache = (id: string, session: ChatSession) => {
+    try {
+      const cacheKey = "vidsage_transcripts";
+      const existing = JSON.parse(localStorage.getItem(cacheKey) || "{}");
+      if (existing && existing[id]) {
+        return {
+          ...session,
+          transcript: existing[id].transcript || session.transcript,
+          suggestedQuestions: existing[id].suggestedQuestions || session.suggestedQuestions,
+        };
+      }
+    } catch {
+      // ignore cache read errors
+    }
+
+    return session;
+  };
+
+  const persistSessions = (next: Record<string, ChatSession>) => {
+    try {
+      // All saved sessions are kept. For non-saved, we keep the 10 most recent ones.
+      const entries = Object.values(next);
+      const saved = entries.filter((s) => s.saved);
+      const nonsaved = entries
+        .filter((s) => !s.saved)
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .slice(0, 10); // Keep more non-saved sessions
+      
+      const finalObj: Record<string, ChatSession> = {};
+      [...saved, ...nonsaved].forEach((s) => (finalObj[s.id] = s));
+      
+      localStorage.setItem("vidsage_all_sessions", JSON.stringify(finalObj));
+      return finalObj;
+    } catch {
+      // Fallback in case of any error
+      localStorage.setItem("vidsage_all_sessions", JSON.stringify(next));
+      return next;
+    }
+  };
+
   // Auto-scroll
   useEffect(() => {
     if (!chatContainerRef.current) return;
@@ -30,14 +70,16 @@ export function useChat(videoId: string | undefined | null, videoTitle?: string)
     if (stored) {
       try {
         sessions = JSON.parse(stored);
+        console.log("Loaded sessions from storage:", sessions); // Debug
         setAllSessions(sessions);
-      } catch {
-        // ignore
+      } catch (e) {
+        console.error("Failed to parse sessions:", e);
       }
     }
 
     if (videoId) {
       const currentSession = sessions[videoId];
+      console.log("Current videoId:", videoId, "Found session:", !!currentSession); // Debug
       if (currentSession?.messages) {
         setChatHistory(currentSession.messages);
         setChatIndex(currentSession.messages.length - 1);
@@ -55,27 +97,104 @@ export function useChat(videoId: string | undefined | null, videoTitle?: string)
     }
   }, [videoId]);
 
-  // Save current session to all sessions
   useEffect(() => {
     if (!videoId) return;
+    const cleanTitle = videoTitle?.trim();
     
-    // Only save if there's actually a history
     setAllSessions((prev) => {
-      const updated = {
-        ...prev,
-        [videoId]: {
-          id: videoId,
-          title: videoTitle || prev[videoId]?.title || "Untitled Video",
-          updatedAt: Date.now(),
-          messages: chatHistory
-        }
+      const existing = prev[videoId];
+      const nextTitle = cleanTitle || existing?.title || "Untitled Video";
+
+      if (existing && existing.title === nextTitle && existing.id === videoId) {
+        return prev;
+      }
+
+      const updatedSession: ChatSession = {
+        id: videoId,
+        title: nextTitle,
+        updatedAt: existing?.updatedAt ?? Date.now(),
+        messages: existing?.messages ?? [],
+        transcript: existing?.transcript,
+        suggestedQuestions: existing?.suggestedQuestions,
+        saved: existing?.saved ?? false,
       };
-      
-      // If we just cleared it, maybe we don't want to save an empty array, but updating is safer
-      localStorage.setItem("vidsage_all_sessions", JSON.stringify(updated));
-      return updated;
+
+      return persistSessions({
+        ...prev,
+        [videoId]: updatedSession,
+      });
     });
-  }, [chatHistory, videoId, videoTitle]);
+  }, [videoId, videoTitle]);
+
+  // Save current session to all sessions when chat history changes
+  useEffect(() => {
+    if (!videoId || chatHistory.length === 0) return;
+
+    setAllSessions((prev) => {
+      const current = prev[videoId];
+      
+      const updatedSession: ChatSession = {
+        id: videoId,
+        title: videoTitle || current?.title || "Untitled Video",
+        updatedAt: Date.now(),
+        messages: chatHistory,
+        saved: current?.saved || false,
+        transcript: current?.transcript,
+        suggestedQuestions: current?.suggestedQuestions,
+      };
+
+      const next = { ...prev, [videoId]: updatedSession };
+      return persistSessions(next);
+    });
+  }, [chatHistory, videoId]); // Removed videoTitle from deps to reduce updates
+
+  const saveSessionPermanently = (id: string) => {
+    setAllSessions((prev) => {
+      const currentSession = prev[id] || {
+        id,
+        title: videoTitle || "Untitled Video",
+        updatedAt: Date.now(),
+        messages: [],
+      };
+
+      const nextSession = readTranscriptCache(id, {
+        ...currentSession,
+        saved: true,
+        updatedAt: Date.now(),
+      });
+
+      return persistSessions({
+        ...prev,
+        [id]: nextSession,
+      });
+    });
+  };
+
+  const toggleSaveSession = (id: string) => {
+    setAllSessions((prev) => {
+      const currentSession = prev[id] || {
+          id,
+          title: videoTitle || "Untitled Video",
+          updatedAt: Date.now(),
+          messages: chatHistory,
+          saved: false
+        };
+
+      const isSaved = !!currentSession.saved;
+      const nextSession = {
+        ...currentSession,
+        saved: !isSaved,
+        updatedAt: Date.now(),
+      };
+
+      const hydratedSession = !isSaved ? readTranscriptCache(id, nextSession) : nextSession;
+
+      return persistSessions({
+        ...prev,
+        [id]: hydratedSession,
+      });
+    });
+  };
 
   const askQuestion = async (question: string) => {
     if (!videoId) {
@@ -83,8 +202,19 @@ export function useChat(videoId: string | undefined | null, videoTitle?: string)
         return;
     }
     if (!question.trim()) return;
+    
+    // Clear input field immediately
+    setChatQuestion("");
     setChatLoading(true);
     setChatAnswer("");
+
+    // Push optimistic message
+    setChatHistory((prev) => {
+      const next = prev.slice(0, chatIndex + 1);
+      next.push({ question, answer: "", format: chatOutputMode });
+      return next;
+    });
+    setChatIndex((prev) => prev + 1);
 
     try {
       const res = await authFetch(`${apiBase}/api/chat/ask/stream`, {
@@ -102,14 +232,11 @@ export function useChat(videoId: string | undefined | null, videoTitle?: string)
       if (!reader) {
         const data = await res.json();
         const answer = String(data.answer ?? "(No answer returned)");
-        setChatAnswer(answer);
         setChatHistory((prev) => {
-          const next = prev.slice(0, chatIndex + 1);
-          next.push({ question, answer, format: chatOutputMode });
+          const next = [...prev];
+          next[next.length - 1].answer = answer;
           return next;
         });
-        setChatIndex((prev) => prev + 1);
-        setChatQuestion("");
         return;
       }
 
@@ -122,27 +249,20 @@ export function useChat(videoId: string | undefined | null, videoTitle?: string)
         done = d;
         if (value) {
           accumulated += decoder.decode(value, { stream: true });
-          setChatAnswer(accumulated);
+          setChatHistory((prev) => {
+            const next = [...prev];
+            next[next.length - 1].answer = accumulated;
+            return next;
+          });
         }
       }
-
-      setChatHistory((prev) => {
-        const next = prev.slice(0, chatIndex + 1);
-        next.push({ question, answer: accumulated, format: chatOutputMode });
-        return next;
-      });
-      setChatIndex((prev) => prev + 1);
-      setChatQuestion("");
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      setChatAnswer(`Error: ${errMsg}`);
       setChatHistory((prev) => {
-        const next = prev.slice(0, chatIndex + 1);
-        next.push({ question, answer: `Error: ${errMsg}`, format: chatOutputMode });
+        const next = [...prev];
+        next[next.length - 1].answer = `Error: ${errMsg}`;
         return next;
       });
-      setChatIndex((prev) => prev + 1);
-      setChatQuestion("");
     } finally {
       setChatLoading(false);
     }
@@ -157,8 +277,7 @@ export function useChat(videoId: string | undefined | null, videoTitle?: string)
       setAllSessions((prev) => {
         const cp = { ...prev };
         delete cp[videoId];
-        localStorage.setItem("vidsage_all_sessions", JSON.stringify(cp));
-        return cp;
+        return persistSessions(cp);
       });
     }
   };
@@ -167,8 +286,7 @@ export function useChat(videoId: string | undefined | null, videoTitle?: string)
     setAllSessions((prev) => {
       const cp = { ...prev };
       delete cp[idToDelete];
-      localStorage.setItem("vidsage_all_sessions", JSON.stringify(cp));
-      return cp;
+      return persistSessions(cp);
     });
     if (idToDelete === videoId) {
       setChatHistory([]);
@@ -176,6 +294,14 @@ export function useChat(videoId: string | undefined | null, videoTitle?: string)
       setChatQuestion("");
       setChatAnswer(null);
     }
+    try {
+      const cacheKey = "vidsage_transcripts";
+      const existing = JSON.parse(localStorage.getItem(cacheKey) || "{}");
+      if (existing && existing[idToDelete]) {
+        delete existing[idToDelete];
+        localStorage.setItem(cacheKey, JSON.stringify(existing));
+      }
+    } catch {}
   };
 
   return {
@@ -191,6 +317,8 @@ export function useChat(videoId: string | undefined | null, videoTitle?: string)
     askQuestion,
     clearChatHistory,
     allSessions,
-    deleteSessionHistory
+    deleteSessionHistory,
+    saveSessionPermanently,
+    toggleSaveSession
   };
 }

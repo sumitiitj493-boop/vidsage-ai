@@ -29,22 +29,49 @@ class TranscriptionService:
         self,
         model_size: str = "base",
         device: str = "cpu",
-        compute_type: str = "int8"
+        compute_type: str = "auto"
     ):
         logger.info(f"Loading Faster-Whisper model: {model_size}")
         import multiprocessing
+        import ctranslate2 as ct
         
+        requested_device = (device or "cpu").strip().lower()
+        resolved_device = "cpu"
+
+        if requested_device in {"cuda", "auto"}:
+            try:
+                cuda_devices = ct.get_cuda_device_count()
+            except Exception:
+                cuda_devices = 0
+            if cuda_devices > 0:
+                resolved_device = "cuda"
+            elif requested_device == "cuda":
+                logger.warning("CUDA requested but no CUDA device found. Falling back to CPU.")
+
+        resolved_compute_type = (compute_type or "auto").strip().lower()
+        if resolved_compute_type == "auto":
+            resolved_compute_type = "float16" if resolved_device == "cuda" else "int8"
+
         import os
         os.environ["OMP_NUM_THREADS"] = str(max(1, multiprocessing.cpu_count() // 2))
 
-        threads = max(1, multiprocessing.cpu_count())
-        # Use more workers to parallel-process VAD segments (MASSIVE CPU BOOST)
-        workers = max(2, multiprocessing.cpu_count() // 2) 
+        # Avoid CPU oversubscription; too many workers can slow real-world throughput.
+        cpu_count = max(1, multiprocessing.cpu_count())
+        threads = max(1, cpu_count - 1) if resolved_device == "cpu" else max(1, cpu_count // 2)
+        workers = min(4, max(1, cpu_count // 2)) if resolved_device == "cpu" else 1
+
+        logger.info(
+            "Whisper runtime resolved: device=%s compute_type=%s cpu_threads=%s workers=%s",
+            resolved_device,
+            resolved_compute_type,
+            threads,
+            workers,
+        )
         
         self.model = WhisperModel(
             model_size,
-            device=device,
-            compute_type=compute_type,
+            device=resolved_device,
+            compute_type=resolved_compute_type,
             cpu_threads=threads,
             num_workers=workers
         )
@@ -85,9 +112,11 @@ class TranscriptionService:
             str(audio_path),
             language=language,
             vad_filter=True,
-            vad_parameters=dict(min_silence_duration_ms=2000 if force_accuracy else 500),
-            beam_size=5 if force_accuracy else 1, # Use beam search for higher accuracy when forced
-            condition_on_previous_text=force_accuracy # Maintain context for better accuracy when forced
+            vad_parameters=dict(min_silence_duration_ms=1800 if force_accuracy else 700),
+            beam_size=5 if force_accuracy else 1,  # Beam search only when accuracy is explicitly requested.
+            best_of=5 if force_accuracy else 1,
+            condition_on_previous_text=force_accuracy,
+            temperature=0,
         )
 
         segments = []

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import FileResponse
 from urllib.parse import urlparse, parse_qs,unquote
 import logging
@@ -8,10 +8,11 @@ import time
 from app.models.video_models import VideoRequest
 from app.services.video_downloader import VideoDownloaderService
 from app.services.youtube_transcript_service import YouTubeTranscriptService
-from app.api.deps import transcription_service
 from app.services.transcript_cleaner import TranscriptCleaner
 from app.services.transcript_quality_checker import TranscriptQualityChecker
 from app.services.rag_service import rag_service  # When a video is successfully processed, we want to immediately save it to the RAG vector database.
+from app.services.job_manager import job_manager
+from app.tasks.transcription_tasks import _perform_youtube_whisper_job
 
 router = APIRouter(prefix="/api/video", tags=["Video Operations"])
 logger = logging.getLogger(__name__)
@@ -89,7 +90,7 @@ async def get_youtube_audio(video_id: str):
     )
 
 @router.post("/download")
-async def download_video(request: VideoRequest):
+async def download_video(request: VideoRequest, background_tasks: BackgroundTasks):
 
     start_time = time.time()
     validation_result = None  # To track why we failed/passed
@@ -198,65 +199,33 @@ async def download_video(request: VideoRequest):
                 "segments": []
             }
 
-        # 3️ Fallback → Download & Whisper (SLOW PATH - Only executes if force_whisper is True)
-        logger.info("Downloading audio for Whisper...")
-        downloader = VideoDownloaderService()
+        # 3️ Fallback → Queue Download + Whisper as background job for real progress reporting.
+        logger.info("Queueing Whisper background job for YouTube video...")
+        job_id = job_manager.create_job()
+        job_manager.update_status(job_id, "queued")
+        job_manager.update_progress(job_id, 1, 0.0, 0.0)
 
-        download_result = await downloader.download_audio(
-            url=request.video_url,
-            output_format=request.output_format,
-            quality=request.quality
+        background_tasks.add_task(
+            _perform_youtube_whisper_job,
+            job_id,
+            request.video_url,
+            video_id,
+            request.output_format,
+            request.quality,
         )
-
-        
-        # 4️ Whisper Transcription
-        logger.info("Running Whisper (Local GPU/CPU)...")
-        # Use simple language hint from YouTube metadata if available (even if invalid content, lang tag might be ok)
-        lang_hint = None
-        if youtube_result.get("language"):
-             lang_hint = youtube_result["language"].split("-")[0]
-             
-
-        import time as _time
-        progress_start_time = _time.time()
-        def print_progress(percent):
-            elapsed = _time.time() - progress_start_time
-            if percent > 0:
-                est_total = elapsed / (percent / 100)
-                est_left = est_total - elapsed
-                print(f"Transcription progress: {percent}% done | Elapsed: {elapsed:.1f}s | Est. left: {est_left:.1f}s", flush=True)
-            else:
-                print(f"Transcription progress: {percent}% done", flush=True)
-
-        whisper_result = transcription_service.transcribe(
-            audio_path=download_result["file_path"],
-            language=lang_hint,
-            progress_callback=print_progress
-        )
-
-        # 5️ Clean the transcript
-        cleaned = await TranscriptCleaner.clean(
-            whisper_result.text,
-            use_llm=False  # Speed optimization: Skip slow LLM cleaning
-        )
-
-        # Prepare segments explicitly
-        segments_data = [{"start": s.start, "end": s.end, "text": s.text} for s in whisper_result.segments]
-
-        # Store for RAG immediately (with timestamps)
-        rag_service.index_video(video_id, segments_data)
 
         return {
             "success": True,
-            "source": "whisper",
+            "queued": True,
+            "source": "whisper_queued",
             "video_id": video_id,
+            "job_id": job_id,
+            "status": "queued",
+            "progress": 1,
             "processing_time_seconds": round(time.time() - start_time, 2),
-            "routing": "fallback_whisper",
+            "routing": "fallback_whisper_async",
             "validation_failure_reason": validation_result.get("reason") if validation_result else "no_youtube_caption",
-            "raw_text": whisper_result.text,
-            "cleaned_text": cleaned["cleaned_text"],
-            "cleaning_steps": cleaned["cleaning_steps"],
-            "segments": segments_data
+            "message": "Whisper job queued. Poll /api/audio/status/{job_id} for real-time progress.",
         }
 
     except HTTPException:

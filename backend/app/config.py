@@ -27,6 +27,7 @@ class Settings:
     # Whisper settings
     WHISPER_MODEL_SIZE: str = os.getenv("WHISPER_MODEL_SIZE", "base")
     WHISPER_DEVICE: str = os.getenv("WHISPER_DEVICE", "cpu")
+    WHISPER_COMPUTE_TYPE: str = os.getenv("WHISPER_COMPUTE_TYPE", "auto")
 
     # File paths
     backend_root = Path(__file__).parent.parent
