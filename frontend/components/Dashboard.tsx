@@ -193,9 +193,9 @@ export default function Dashboard() {
           onLogout={handleLogout}
         />
 
-        <main className="flex-1 overflow-y-auto px-6 pb-10 custom-scrollbar">
+        <main className="flex-1 overflow-y-auto px-4 md:px-6 pb-10 custom-scrollbar">
           {processor.stage === "processing" && (
-            <div className="mt-24 flex flex-col items-center justify-center animate-fade-in w-full max-w-3xl mx-auto">
+            <div className="mt-12 md:mt-24 flex flex-col items-center justify-center animate-fade-in w-full max-w-3xl mx-auto">
               <ProcessingLoader 
                   inputMode={processor.inputMode} 
                   audioJobId={processor.audioJobId} 
@@ -208,9 +208,9 @@ export default function Dashboard() {
           )}
 
           {processor.stage === "ready" && (
-            <div className="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-6 items-start pt-6 h-full min-h-[75vh]">
+            <div className="flex flex-col lg:grid lg:grid-cols-[auto_1fr] 2xl:grid-cols-[380px_1fr] gap-4 md:gap-6 items-start pt-4 md:pt-6 h-full min-h-[75vh]">
               
-              <div className="sticky top-6">
+              <div className="w-full lg:w-[320px] 2xl:w-full lg:sticky lg:top-6 lg:h-auto shrink-0 self-start">
                 <DashboardSidebar
                   videoId={videoId} videoTitle={videoTitle} source={processor.downloadState.response?.source || "unknown"}
                   inputMode={processor.inputMode} activeMode={processor.activeMode} setActiveMode={processor.setActiveMode}
@@ -221,7 +221,7 @@ export default function Dashboard() {
                 />
               </div>
 
-              <div className="flex flex-col rounded-3xl h-full shadow-2xl relative overflow-hidden bg-slate-900/40 border border-white/5">
+              <div className="flex flex-col rounded-2xl md:rounded-3xl h-full shadow-2xl relative overflow-hidden bg-slate-900/40 border border-white/5 w-full min-h-[500px] lg:min-h-0">
                 {processor.activeMode === "progress" && (
                   <ProgressView inputMode={processor.inputMode} audioProgress={processor.audioProgress} isAudioDone={processor.isAudioDone} audioStatus={processor.audioStatus} audioElapsed={processor.audioElapsed} audioEstimated={processor.audioEstimated} setActiveMode={processor.setActiveMode} />
                 )}

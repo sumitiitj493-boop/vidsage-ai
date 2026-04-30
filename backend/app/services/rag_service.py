@@ -75,13 +75,13 @@ class RAGService:
 
 IMPORTANT INSTRUCTIONS (Use for notebook-quality math notes):
 - Output must be valid LaTeX and Markdown only.
-- Use `\\text{...}` for prose inside LaTeX math segments if needed.
+- Use `\\text{{...}}` for prose inside LaTeX math segments if needed.
 - For formulas, use LaTeX math delimiters (`$...$` inline, `$$...$$` block).
 - Prefer standalone `$$...$$` blocks for any non-trivial equation or derivation.
 - Never split a single equation across multiple lines or emit unmatched dollar signs.
 - Provide section headings, bullet points, and clean structure.
 - Do NOT include raw segment tags like "Segment (0:00)" repeated.
-- Do not output Hindi or other mix-language in this mode; use English only.
+- ENGLISH ONLY: If the user asks in Hindi or the transcript has Hindi, TRANSLATE your response completely to English. Do NEVER output Devanagari script or it will break the LaTeX compiler.
 - If you cannot answer, output `\\text{{Unable to generate notes.}}`.
 """
 
@@ -998,6 +998,11 @@ IMPORTANT INSTRUCTIONS (Use for notebook-quality math notes):
 Continue writing comprehensive, flowing course notes based on the following transcript segment.
 Use LaTeX formatting with colors, boxes, and interactive elements to make the notes visually appealing.
 
+CRITICAL INSTRUCTIONS (MANDATORY):
+1. ENGLISH ONLY: Always write notes strictly in English. If the transcript contains Hindi or any other language, seamlessly TRANSLATE the content to English. NEVER output Hindi text (Devanagari script), as it will break the LaTeX compiler.
+2. CORRECT MATH SYNTAX: Ensure all math formulas are perfectly valid LaTeX. Avoid broken syntax (e.g. malformed fractions). Use `\\(` and `\\)` for inline math, and `\\[` and `\\]` or `$$` for block math.
+3. CORRECT TABLES: Do not use `\\n` inside table environments. Structure tables properly using `&` and `\\\\` with `\\begin{{tabular}}` and `\\end{{tabular}}`.
+
 Guidelines:
 - Use \\textcolor{{blue}}{{text}} for key terms and important concepts.
 - Use \\begin{{tcolorbox}}[colback=blue!5!white,colframe=blue!75!black,title=Key Insight]
@@ -1032,7 +1037,7 @@ CRITICAL FORMATTING RULES (STRICTLY REQUIRED):
 3. COLORED SUB-HEADERS: Let headers be creative, NOT literal labels like "Blockquotes". Use `### ` or `#### `. Our system automatically styles these creatively.
 4. TECHNICAL BADGES: Wrap technical variables or keywords in standard markdown backticks (` ` `).
 5. MATH STYLING: Use precise LaTeX for equations (wrap inline math in `$` and block math in `$$`).
-6. LANGUAGE: Generate notes strictly in professional English.
+6. LANGUAGE (STRICT): Always write notes purely in English. If the transcript contains Hindi or another language, seamlessly TRANSLATE it to English. Do NEVER write notes in Hindi.
 
 Previous Context (pick up the flow from here):
 {prev_context[-800:] if prev_context else "This is the start of the lecture."}

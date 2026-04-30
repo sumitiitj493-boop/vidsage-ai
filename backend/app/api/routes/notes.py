@@ -9,6 +9,10 @@ from app.services.rag_service import RateLimitError, rag_service
 
 def sanitize_latex(latex_content: str) -> str:
     """Sanitize LaTeX content to fix common issues."""
+    
+    # Strip any Devanagari (Hindi) characters as a fallback, they break pdflatex
+    latex_content = re.sub(r'[\u0900-\u097F]+', '', latex_content)
+    
     # Fix unbalanced braces (simple check)
     open_braces = latex_content.count('{')
     close_braces = latex_content.count('}')

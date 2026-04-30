@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { FileText, Mic, Link as LinkIcon, Sparkles, Zap, Layers, Network, MessageSquare } from "lucide-react";
+import { FileText, FileAudio, Link as LinkIcon, Sparkles, Zap, Layers, Network, MessageSquare, RotateCcw, Clock } from "lucide-react";
 
 export default function LandingView({ processor, fileInputRef, audioInputRef }: any) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -207,6 +207,10 @@ export default function LandingView({ processor, fileInputRef, audioInputRef }: 
           min-height: calc(100vh - 200px);
           padding: 4rem 1.5rem 5rem;
           text-align: center;
+          width: 100%;
+          max-width: 100vw;
+          box-sizing: border-box;
+          overflow-x: hidden;
         }
 
         .landing-wrapper .badge {
@@ -418,6 +422,37 @@ export default function LandingView({ processor, fileInputRef, audioInputRef }: 
           from { transform: translateX(0); }
           to   { transform: translateX(-50%); }
         }
+
+        /* Mobile Adjustments */
+        @media (max-width: 768px) {
+          .landing-wrapper {
+            max-width: 100vw;
+          }
+          .landing-wrapper nav {
+            padding: 1rem;
+            overflow: hidden;
+          }
+          .landing-wrapper .logo-sub {
+            display: none;
+          }
+          .landing-wrapper .nav-btn-text {
+            display: none;
+          }
+          .landing-wrapper .nav-btn {
+            padding: 0.45rem 0.6rem;
+          }
+          .landing-wrapper .hero {
+            padding: 3rem 1rem 4rem;
+            width: 100%;
+            max-width: 100vw;
+            box-sizing: border-box;
+          }
+          .landing-wrapper .hero-headline {
+            font-size: clamp(2rem, 8vw, 4rem);
+            word-break: break-word;
+            overflow-wrap: break-word;
+          }
+        }
       `}} />
 
       <div className="landing-wrapper">
@@ -449,9 +484,15 @@ export default function LandingView({ processor, fileInputRef, audioInputRef }: 
           </div>
           <div className="nav-right">
             <button className="nav-btn-icon" title="Import PDF" onClick={() => fileInputRef.current?.click()}><FileText size={18} /></button>
-            <button className="nav-btn-icon" title="Upload Audio" onClick={() => audioInputRef.current?.click()}><Mic size={18} /></button>
-            <button className="nav-btn" onClick={processor.resetSession}>New Session</button>
-            <button className="nav-btn">History</button>
+            <button className="nav-btn-icon" title="Upload Audio File" onClick={() => audioInputRef.current?.click()}><FileAudio size={18} /></button>
+            <button className="nav-btn flex items-center gap-2" onClick={processor.resetSession} title="New Session">
+              <RotateCcw size={16} />
+              <span className="nav-btn-text">New Session</span>
+            </button>
+            <button className="nav-btn flex items-center gap-2" title="History">
+              <Clock size={16} />
+              <span className="nav-btn-text">History</span>
+            </button>
           </div>
         </nav>
 
@@ -489,8 +530,8 @@ export default function LandingView({ processor, fileInputRef, audioInputRef }: 
                 }}
               />
               <div className="btn-group">
-                <button className="btn-icon" title="Upload PDF" onClick={() => fileInputRef.current?.click()}><FileText size={18} /></button>
-                <button className="btn-icon" title="Upload Audio" onClick={() => audioInputRef.current?.click()}><Mic size={18} /></button>
+              <button className="btn-icon" title="Upload PDF File" onClick={() => fileInputRef.current?.click()}><FileText size={18} /></button>
+              <button className="btn-icon" title="Upload Audio File" onClick={() => audioInputRef.current?.click()}><FileAudio size={18} /></button>
                 <button className="btn-process" onClick={() => processor.processVideo({})}>
                   <Sparkles size={16} /> Process
                 </button>
