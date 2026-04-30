@@ -12,6 +12,7 @@ export interface ChatMessage {
 
 export interface ChatSession {
   id: string;
+  videoId?: string; // Track which video this session belongs to
   title: string;
   updatedAt: number;
   messages: ChatMessage[];

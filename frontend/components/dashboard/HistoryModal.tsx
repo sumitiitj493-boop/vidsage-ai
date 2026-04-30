@@ -16,6 +16,7 @@ const isYouTubeId = (id: string) => /^[a-zA-Z0-9_-]{11}$/.test(id);
 
 export default function HistoryModal({ isOpen, onClose, sessions, onSelectSession, onDeleteSession, onSaveSession }: HistoryModalProps) {
   const [activeTab, setActiveTab] = useState<"recent" | "saved">("recent");
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
 
   if (!isOpen) return null;
   
@@ -23,20 +24,42 @@ export default function HistoryModal({ isOpen, onClose, sessions, onSelectSessio
   const sortedSessions = Object.values(sessions).sort((a, b) => b.updatedAt - a.updatedAt);
 
   const savedSessions = sortedSessions.filter((s) => s.saved);
-  const recentSessions = sortedSessions.slice(0, 15); // Show more recent ones
+  const recentSessions = sortedSessions.slice(0, 20);
 
   const visibleSessions = activeTab === "saved" ? savedSessions : recentSessions;
 
-  // Grouping by video title/ID is good for organizing multiple sessions of the same video
-  // However, we must ensure we don't hide sessions.
+  // Group by videoId to show multiple sessions for the same video
   const groups: Record<string, ChatSession[]> = {};
   visibleSessions.forEach((s) => {
-    const key = s.id || s.title || "Untitled";
+    const key = s.videoId || s.id || s.title || "Untitled";
     groups[key] = groups[key] || [];
     groups[key].push(s);
   });
 
+  // Sort sessions within each group by updatedAt descending
   Object.keys(groups).forEach((k) => groups[k].sort((a, b) => b.updatedAt - a.updatedAt));
+
+  const toggleGroup = (key: string) => {
+    setExpandedGroups((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  };
+
+  const formatDate = (timestamp: number) => {
+    const date = new Date(timestamp);
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    if (date.toDateString() === today.toDateString()) {
+      return date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+    } else if (date.toDateString() === yesterday.toDateString()) {
+      return "Yesterday";
+    } else {
+      return date.toLocaleDateString();
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-end bg-slate-950/60 backdrop-blur-sm transition-opacity duration-300">
@@ -77,55 +100,105 @@ export default function HistoryModal({ isOpen, onClose, sessions, onSelectSessio
               {activeTab === "saved" ? "No saved sessions yet." : "No recent chat sessions found."}
             </div>
           ) : (
-            Object.keys(groups).map((title) => {
-              const list = groups[title];
-              const latest = list[0];
-              const ytThumbnail = isYouTubeId(latest.id) ? `https://img.youtube.com/vi/${latest.id}/mqdefault.jpg` : null;
+            Object.keys(groups).map((videoKey) => {
+              const videoSessions = groups[videoKey];
+              const latestSession = videoSessions[0];
+              const isExpanded = expandedGroups[videoKey] ?? videoSessions.length === 1;
+              const ytThumbnail = latestSession.videoId && isYouTubeId(latestSession.videoId) 
+                ? `https://img.youtube.com/vi/${latestSession.videoId}/mqdefault.jpg` 
+                : null;
 
               return (
-                <div key={title} className="group relative bg-slate-950/40 border border-white/5 rounded-xl p-4 hover:border-amber-500/30 hover:bg-slate-950 transition-all flex flex-col gap-3">
-                  <div className="flex gap-3 items-start">
+                <div key={videoKey} className="group relative bg-slate-950/40 border border-white/5 rounded-xl overflow-hidden hover:border-amber-500/30 hover:bg-slate-950 transition-all">
+                  {/* Header - always visible */}
+                  <div 
+                    onClick={() => toggleGroup(videoKey)}
+                    className="p-4 flex gap-3 items-start cursor-pointer"
+                  >
                     {ytThumbnail && (
-                      <div className="relative w-28 aspect-video rounded-lg overflow-hidden bg-slate-800 flex-shrink-0">
-                        <Image src={ytThumbnail} alt="Thumbnail" fill sizes="112px" unoptimized className="object-cover" />
+                      <div className="relative w-24 aspect-video rounded-lg overflow-hidden bg-slate-800 flex-shrink-0">
+                        <Image src={ytThumbnail} alt="Thumbnail" fill sizes="96px" unoptimized className="object-cover" />
                       </div>
                     )}
                     <div className="flex-1 min-w-0">
-                      <h3 className="font-medium text-slate-200 line-clamp-2 leading-tight">{title}</h3>
+                      <h3 className="font-medium text-slate-200 line-clamp-2 leading-tight">{latestSession.title}</h3>
                       <div className="mt-2 text-xs text-slate-500 flex items-center gap-3">
-                        <span className="flex items-center gap-1"><MessageSquare className="w-3 h-3" />{latest.messages.length}</span>
-                        <span>{list.length} session{list.length > 1 ? 's' : ''}</span>
-                        <span className="text-[10px] ml-auto">{new Date(latest.updatedAt).toLocaleDateString()}</span>
+                        <span className="flex items-center gap-1"><MessageSquare className="w-3 h-3" />{latestSession.messages.length}</span>
+                        <span>{videoSessions.length} session{videoSessions.length > 1 ? 's' : ''}</span>
+                        <span className="text-[10px]">{formatDate(latestSession.updatedAt)}</span>
                       </div>
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-end gap-2 mt-1">
-                    {onSaveSession && (
+                  {/* Individual sessions - shown when expanded */}
+                  {isExpanded && videoSessions.length > 1 && (
+                    <div className="border-t border-white/5 bg-slate-950/20">
+                      {videoSessions.map((session, idx) => (
+                        <div key={session.id} className={`px-4 py-3 flex items-center justify-between text-sm hover:bg-slate-900/30 transition-colors ${idx < videoSessions.length - 1 ? 'border-b border-white/5' : ''}`}>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-slate-300 flex items-center gap-2">
+                              <MessageSquare className="w-3 h-3 text-slate-500" />
+                              <span>{session.messages.length} message{session.messages.length !== 1 ? 's' : ''}</span>
+                            </div>
+                            <div className="text-xs text-slate-500 mt-1">{formatDate(session.updatedAt)}</div>
+                          </div>
+                          <div className="flex items-center justify-end gap-2 ml-2 flex-shrink-0">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onSelectSession(session);
+                              }}
+                              className="px-2 py-1 text-xs rounded-md bg-transparent border border-white/10 hover:border-amber-500/30 text-white"
+                            >
+                              Open
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onDeleteSession(session.id);
+                              }}
+                              className="p-1 text-slate-500 hover:text-red-400 hover:bg-red-400/10 rounded-lg"
+                              title="Delete this session"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Action buttons for single session or group */}
+                  {(!isExpanded || videoSessions.length === 1) && (
+                    <div className="flex items-center justify-end gap-2 p-4 border-t border-white/5">
+                      {onSaveSession && (
+                        <button
+                          type="button"
+                          onClick={() => onSaveSession(latestSession.id)}
+                          className={`flex items-center gap-1 px-3 py-1.5 text-xs rounded-md font-semibold transition-colors ${latestSession.saved ? 'bg-slate-800 text-amber-500 hover:bg-slate-700' : 'bg-amber-500 text-slate-950 hover:brightness-95'}`}
+                        >
+                          {latestSession.saved ? <><BookmarkCheck className="w-3 h-3" /> Saved</> : <><Bookmark className="w-3 h-3" /> Save</>}
+                        </button>
+                      )}
                       <button
                         type="button"
-                        onClick={() => onSaveSession(latest.id)}
-                        className={`flex items-center gap-1 px-3 py-1.5 text-xs rounded-md font-semibold transition-colors ${latest.saved ? 'bg-slate-800 text-amber-500 hover:bg-slate-700' : 'bg-amber-500 text-slate-950 hover:brightness-95'}`}
+                        onClick={() => onSelectSession(latestSession)}
+                        className="px-3 py-1.5 text-xs rounded-md bg-transparent border border-white/10 hover:border-amber-500/30 text-white"
                       >
-                        {latest.saved ? <><BookmarkCheck className="w-3 h-3" /> Saved</> : <><Bookmark className="w-3 h-3" /> Save</>}
+                        Open Latest
                       </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => onSelectSession(latest)}
-                      className="px-3 py-1.5 text-xs rounded-md bg-transparent border border-white/10 hover:border-amber-500/30 text-white"
-                    >
-                      Open Video
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onDeleteSession(latest.id)}
-                      className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-400/10 rounded-lg"
-                      title="Delete all sessions for this video"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
+                      <button
+                        type="button"
+                        onClick={() => onDeleteSession(videoSessions[0].id)}
+                        className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-400/10 rounded-lg"
+                        title="Delete latest session"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })

@@ -11,11 +11,18 @@ export function useChat(videoId: string | undefined | null, videoTitle?: string)
   const [chatOutputMode, setChatOutputMode] = useState<"markdown" | "latex">("markdown");
   const [chatLanguage, setChatLanguage] = useState<string>("auto");
   const [allSessions, setAllSessions] = useState<Record<string, ChatSession>>({});
+  const [sessionId, setSessionId] = useState<string>("");
   
   const chatContainerRef = useRef<HTMLDivElement | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const previousVideoIdRef = useRef<string | undefined | null>(null);
 
   const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+
+  // Generate unique session ID
+  const generateSessionId = () => {
+    return `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  };
 
   const readTranscriptCache = (id: string, session: ChatSession) => {
     try {
@@ -78,39 +85,42 @@ export function useChat(videoId: string | undefined | null, videoTitle?: string)
     }
 
     if (videoId) {
-      const currentSession = sessions[videoId];
-      console.log("Current videoId:", videoId, "Found session:", !!currentSession); // Debug
-      if (currentSession?.messages) {
-        setChatHistory(currentSession.messages);
-        setChatIndex(currentSession.messages.length - 1);
-      } else {
+      // Generate new session ID for fresh video load
+      if (previousVideoIdRef.current !== videoId) {
+        const newSessionId = generateSessionId();
+        setSessionId(newSessionId);
+        previousVideoIdRef.current = videoId;
+        
+        // Start with empty chat for new session
         setChatHistory([]);
         setChatIndex(-1);
+        setChatAnswer(null);
+        setChatQuestion("");
       }
-      setChatAnswer(null);
-      setChatQuestion("");
     } else {
       setChatHistory([]);
       setChatIndex(-1);
       setChatAnswer(null);
       setChatQuestion("");
+      setSessionId("");
     }
   }, [videoId]);
 
   useEffect(() => {
-    if (!videoId) return;
+    if (!videoId || !sessionId) return;
     const cleanTitle = videoTitle?.trim();
     
     setAllSessions((prev) => {
-      const existing = prev[videoId];
+      const existing = prev[sessionId];
       const nextTitle = cleanTitle || existing?.title || "Untitled Video";
 
-      if (existing && existing.title === nextTitle && existing.id === videoId) {
+      if (existing && existing.title === nextTitle && existing.videoId === videoId) {
         return prev;
       }
 
       const updatedSession: ChatSession = {
-        id: videoId,
+        id: sessionId,
+        videoId: videoId, // Store video ID for grouping
         title: nextTitle,
         updatedAt: existing?.updatedAt ?? Date.now(),
         messages: existing?.messages ?? [],
@@ -121,20 +131,21 @@ export function useChat(videoId: string | undefined | null, videoTitle?: string)
 
       return persistSessions({
         ...prev,
-        [videoId]: updatedSession,
+        [sessionId]: updatedSession,
       });
     });
-  }, [videoId, videoTitle]);
+  }, [videoId, sessionId, videoTitle]);
 
   // Save current session to all sessions when chat history changes
   useEffect(() => {
-    if (!videoId || chatHistory.length === 0) return;
+    if (!videoId || !sessionId || chatHistory.length === 0) return;
 
     setAllSessions((prev) => {
-      const current = prev[videoId];
+      const current = prev[sessionId];
       
       const updatedSession: ChatSession = {
-        id: videoId,
+        id: sessionId,
+        videoId: videoId,
         title: videoTitle || current?.title || "Untitled Video",
         updatedAt: Date.now(),
         messages: chatHistory,
@@ -143,15 +154,16 @@ export function useChat(videoId: string | undefined | null, videoTitle?: string)
         suggestedQuestions: current?.suggestedQuestions,
       };
 
-      const next = { ...prev, [videoId]: updatedSession };
+      const next = { ...prev, [sessionId]: updatedSession };
       return persistSessions(next);
     });
-  }, [chatHistory, videoId]); // Removed videoTitle from deps to reduce updates
+  }, [chatHistory, videoId, sessionId]); // Include sessionId in deps
 
   const saveSessionPermanently = (id: string) => {
     setAllSessions((prev) => {
       const currentSession = prev[id] || {
         id,
+        videoId: videoId || "",
         title: videoTitle || "Untitled Video",
         updatedAt: Date.now(),
         messages: [],
@@ -174,6 +186,7 @@ export function useChat(videoId: string | undefined | null, videoTitle?: string)
     setAllSessions((prev) => {
       const currentSession = prev[id] || {
           id,
+          videoId: videoId || "",
           title: videoTitle || "Untitled Video",
           updatedAt: Date.now(),
           messages: chatHistory,
@@ -273,10 +286,10 @@ export function useChat(videoId: string | undefined | null, videoTitle?: string)
     setChatIndex(-1);
     setChatQuestion("");
     setChatAnswer(null);
-    if (videoId) {
+    if (sessionId) {
       setAllSessions((prev) => {
         const cp = { ...prev };
-        delete cp[videoId];
+        delete cp[sessionId];
         return persistSessions(cp);
       });
     }
@@ -288,7 +301,7 @@ export function useChat(videoId: string | undefined | null, videoTitle?: string)
       delete cp[idToDelete];
       return persistSessions(cp);
     });
-    if (idToDelete === videoId) {
+    if (idToDelete === sessionId) {
       setChatHistory([]);
       setChatIndex(-1);
       setChatQuestion("");
@@ -304,6 +317,20 @@ export function useChat(videoId: string | undefined | null, videoTitle?: string)
     } catch {}
   };
 
+  const restoreSession = (session: ChatSession) => {
+    // Set the session ID and load chat history for that session
+    setSessionId(session.id);
+    if (session.messages && session.messages.length > 0) {
+      setChatHistory(session.messages);
+      setChatIndex(session.messages.length - 1);
+    } else {
+      setChatHistory([]);
+      setChatIndex(-1);
+    }
+    setChatQuestion("");
+    setChatAnswer(null);
+  };
+
   return {
     chatQuestion, setChatQuestion,
     chatAnswer, setChatAnswer,
@@ -314,11 +341,13 @@ export function useChat(videoId: string | undefined | null, videoTitle?: string)
     chatLanguage, setChatLanguage,
     chatContainerRef,
     chatEndRef,
+    sessionId,
     askQuestion,
     clearChatHistory,
     allSessions,
     deleteSessionHistory,
     saveSessionPermanently,
-    toggleSaveSession
+    toggleSaveSession,
+    restoreSession
   };
 }

@@ -154,7 +154,10 @@ export default function Dashboard() {
           sessions={Object.values(chat.allSessions)}
           onSelectSession={(session) => {
             setIsHistoryOpen(false);
-            processor.loadSession(session.id, session.title);
+            // Load the video metadata
+            processor.loadSession(session.videoId || session.id, session.title);
+            // Restore the session messages
+            chat.restoreSession(session);
             setIsChatOpen(true);
           }}
           onDeleteSession={chat.deleteSessionHistory}
@@ -213,8 +216,8 @@ export default function Dashboard() {
                   inputMode={processor.inputMode} activeMode={processor.activeMode} setActiveMode={processor.setActiveMode}
                   isProcessing={processor.isProcessing} handleForceWhisper={() => processor.processVideo({ forceWhisper: true })}
                   transcriptLength={processor.transcriptText.length} audioJobId={processor.audioJobId} audioStatus={processor.audioStatus}
-                  isSaved={videoId ? !!chat.allSessions[videoId]?.saved : false}
-                  onToggleSave={() => { if (videoId) chat.toggleSaveSession(videoId); }}
+                  isSaved={chat.sessionId ? !!chat.allSessions[chat.sessionId]?.saved : false}
+                  onToggleSave={() => { if (chat.sessionId) chat.toggleSaveSession(chat.sessionId); }}
                 />
               </div>
 
@@ -320,7 +323,10 @@ export default function Dashboard() {
         sessions={Object.values(chat.allSessions)}
         onSelectSession={(session) => {
           setIsHistoryOpen(false);
-          processor.loadSession(session.id, session.title);
+          // Load the video metadata
+          processor.loadSession(session.videoId || session.id, session.title);
+          // Restore the session messages
+          chat.restoreSession(session);
           setIsChatOpen(true);
         }}
         onDeleteSession={chat.deleteSessionHistory}
