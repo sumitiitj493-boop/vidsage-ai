@@ -23,6 +23,7 @@ app/uploads/
 backend/app/uploads/
 backend/app/downloads/
 backend/chroma_db/
+backend/cookies.txt
 
 # IDE
 .vscode/

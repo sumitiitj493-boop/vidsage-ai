@@ -12,15 +12,29 @@ class VideoDownloaderService:
 
     def _get_ydl_opts(self, output_format: str, quality: str) -> Dict:
         return {
-            "format": "bestaudio/best",
-            "postprocessors": [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": output_format,
-                "preferredquality": quality,
+            'format': 'bestaudio/best',
+            'outtmpl': str(self.download_dir / "%(id)s.%(ext)s"),
+            'quiet': True,
+            'no_warnings': False,
+            'cookiefile': r'D:\semesters\sem4\projects\VidSage\backend\cookies.txt',
+            'extractor_args': {
+                'youtube': {
+                    'skip': ['dash', 'hls'],
+                    'player_skip': ['js'],
+                }
+            },
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+                'Accept-Language': 'en-US,en;q=0.9',
+            },
+            'socket_timeout': 30,
+            'retries': 3,
+            'fragment_retries': 3,
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': output_format,
+                'preferredquality': quality,
             }],
-            "outtmpl": str(self.download_dir / "%(id)s.%(ext)s"),
-            "quiet": True,
-            "no_warnings": True,
         }
 
     async def download_audio(self, url: str, output_format: str = "mp3", quality: str = "192") -> Dict[str, Any]:
@@ -58,7 +72,7 @@ class VideoDownloaderService:
     def get_video_title(url: str) -> str:
         """Fetch video title using yt-dlp without downloading."""
         try:
-            with yt_dlp.YoutubeDL({'quiet': True, 'skip_download': True}) as ydl:
+            with yt_dlp.YoutubeDL({'quiet': True, 'skip_download': True, 'cookiefile': r'D:\semesters\sem4\projects\VidSage\backend\cookies.txt'}) as ydl:
                 info = ydl.extract_info(url, download=False)
                 return info.get('title', 'Unknown Video')
         except Exception:

@@ -19,8 +19,29 @@ class YouTubeTranscriptService:
         try:
             logger.info(f"Checking YouTube transcript for video: {video_id}")
 
+            import os
+            cookies_file = os.path.join(os.getcwd(), 'cookies.txt')
+            # Look in backend dir
+            if not os.path.exists(cookies_file):
+                cookies_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'cookies.txt')
+            
             # `YouTubeTranscriptApi.list` is an instance method, so instantiate first.
-            yt = YouTubeTranscriptApi()
+            if os.path.exists(cookies_file):
+                logger.info("Using cookies file for transcript fetch.")
+                try:
+                    import http.cookiejar
+                    import requests
+                    cookie_jar = http.cookiejar.MozillaCookieJar(cookies_file)
+                    cookie_jar.load(ignore_discard=True, ignore_expires=True)
+                    session = requests.Session()
+                    session.cookies = cookie_jar
+                    yt = YouTubeTranscriptApi(http_client=session)
+                except Exception as e:
+                    logger.warning(f"Failed to load cookies: {e}")
+                    yt = YouTubeTranscriptApi()
+            else:
+                yt = YouTubeTranscriptApi()
+                
             transcripts_obj = yt.list(video_id)
 
             # Extract a list of transcript objects (the library uses a TranscriptList wrapper)
@@ -116,6 +137,8 @@ class YouTubeTranscriptService:
 
         except Exception as e:
             logger.error(f"Unexpected YouTube transcript error for {video_id}: {e}")
+            if "blocking requests from your IP" in str(e):
+                return {"success": False, "is_429": True, "error_msg": "YouTube is rate limiting (IP block)."}
             return {"success": False}
 
     @staticmethod
