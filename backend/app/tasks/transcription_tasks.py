@@ -108,8 +108,9 @@ def _perform_job(
         "segments": segments_data,
     })
 
-    # Indexing in the background using a separate Celery task
-    index_video_task.delay(output_video_id, segments_data)
+    # Index immediately so revision notes and chat work even without a Celery worker.
+    from app.services.rag_service import rag_service
+    rag_service.index_video(output_video_id, segments_data)
 
 
 def _perform_youtube_whisper_job(
@@ -134,6 +135,25 @@ def _perform_youtube_whisper_job(
         job_id=job_id,
         file_path=downloaded_file,
         force_whisper=False,
+        video_id_override=video_id,
+    )
+
+
+def _perform_whisper_on_file(video_id: str, file_path: str, user_id: str):
+    """Run Whisper on a manually uploaded file using the same pipeline as normal jobs."""
+    from app.services.job_manager import job_manager
+
+    # Register the job using the existing video_id as the job key
+    # create_job returns a new id — we need to hijack the store to use our video_id
+    job_manager.update_status(video_id, "queued")
+    job_manager.update_progress(video_id, 0, 0, 0)
+    job_manager.update_file_path(video_id, file_path)
+
+    # Reuse the exact same working pipeline
+    _perform_job(
+        job_id=video_id,
+        file_path=file_path,
+        force_whisper=True,
         video_id_override=video_id,
     )
 

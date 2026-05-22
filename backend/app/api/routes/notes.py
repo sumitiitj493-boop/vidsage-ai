@@ -6,24 +6,13 @@ import tempfile
 import subprocess
 import re
 from app.services.rag_service import RateLimitError, rag_service
+from app.services.job_manager import job_manager
 
 def sanitize_latex(latex_content: str) -> str:
     """Sanitize LaTeX content to fix common issues."""
     
     # Strip any Devanagari (Hindi) characters as a fallback, they break pdflatex
     latex_content = re.sub(r'[\u0900-\u097F]+', '', latex_content)
-    
-    # Fix unbalanced braces (simple check)
-    open_braces = latex_content.count('{')
-    close_braces = latex_content.count('}')
-    if open_braces > close_braces:
-        # Add missing closing braces
-        latex_content += '}' * (open_braces - close_braces)
-    elif close_braces > open_braces:
-        # Remove extra closing braces (last ones)
-        diff = close_braces - open_braces
-        latex_content = latex_content.rstrip('}')
-        latex_content = latex_content[:-diff] if diff < len(latex_content) else latex_content
     
     # Fix common issues: ensure \end{tcolorbox} is present for each \begin{tcolorbox}
     begin_count = latex_content.count('\\begin{tcolorbox}')
@@ -35,6 +24,16 @@ def sanitize_latex(latex_content: str) -> str:
     latex_content = latex_content.rstrip('\\')
     
     return latex_content
+
+
+def _run_latex_compile(cmd: list[str], temp_dir: str, tex_path: str, pdf_path: str):
+    process = subprocess.run(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=temp_dir,
+    )
+    return process
 
 router = APIRouter(prefix="/api/notes", tags=["Notes"])
 
@@ -53,7 +52,13 @@ def download_pdf_notes(video_id: str):
         notebook_json = rag_service.generate_masterclass_notebook(
             video_id, output_format="latex"
         )
-        latex_content = "\n".join([cell["source"][0] for cell in notebook_json.get("cells", []) if cell["cell_type"] == "markdown"])
+        latex_content = "\n".join(
+            [
+                "".join(cell.get("source", [])) if isinstance(cell.get("source", []), list) else str(cell.get("source", ""))
+                for cell in notebook_json.get("cells", [])
+                if cell.get("cell_type") == "markdown"
+            ]
+        )
         
         # Strip any existing preamble from LLM to force OUR custom preamble
         if "\\begin{document}" in latex_content:
@@ -87,20 +92,26 @@ def download_pdf_notes(video_id: str):
             f.write(latex_content)
             
         # Try XeLaTeX first, fallback to pdfLaTeX
-        process = subprocess.run(
+        process = _run_latex_compile(
             ["xelatex", "-interaction=nonstopmode", "-halt-on-error", "-enable-installer", "-output-directory", temp_dir, tex_path],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            temp_dir,
+            tex_path,
+            pdf_path,
         )
-        
-        if not os.path.exists(pdf_path):
+
+        if process.returncode != 0 or not os.path.exists(pdf_path):
             # Fallback to pdfLaTeX
-            process = subprocess.run(
+            process = _run_latex_compile(
                 ["pdflatex", "-interaction=nonstopmode", "-halt-on-error", "-enable-installer", "-output-directory", temp_dir, tex_path],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                temp_dir,
+                tex_path,
+                pdf_path,
             )
-        
-        if not os.path.exists(pdf_path):
-            raise Exception("Failed to compile LaTeX to PDF. Is pdflatex installed?\n" + process.stdout.decode('utf-8'))
+
+        if process.returncode != 0 or not os.path.exists(pdf_path):
+            stderr = process.stderr.decode("utf-8", errors="ignore") if process.stderr else ""
+            stdout = process.stdout.decode("utf-8", errors="ignore") if process.stdout else ""
+            raise Exception("Failed to compile LaTeX to PDF. Is pdflatex installed?\n" + stderr + "\n" + stdout)
             
         return FileResponse(path=pdf_path, filename=f"VidSage_Notes_{video_id}.pdf", media_type="application/pdf")
         
@@ -138,12 +149,14 @@ def compile_latex_to_pdf(request: CompileRequest):
         with open(tex_path, "w", encoding="utf-8") as f:
             f.write(latex_content)
             
-        process = subprocess.run(["xelatex", "-interaction=nonstopmode", "-halt-on-error", "-enable-installer", "-output-directory", temp_dir, tex_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        if not os.path.exists(pdf_path):
+        process = _run_latex_compile(["xelatex", "-interaction=nonstopmode", "-halt-on-error", "-enable-installer", "-output-directory", temp_dir, tex_path], temp_dir, tex_path, pdf_path)
+        if process.returncode != 0 or not os.path.exists(pdf_path):
             # Fallback to pdfLaTeX
-            process = subprocess.run(["pdflatex", "-interaction=nonstopmode", "-halt-on-error", "-enable-installer", "-output-directory", temp_dir, tex_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        if not os.path.exists(pdf_path):
-            raise Exception("Failed to compile LaTeX.\nLogs: " + process.stdout.decode("utf-8", errors="ignore"))
+            process = _run_latex_compile(["pdflatex", "-interaction=nonstopmode", "-halt-on-error", "-enable-installer", "-output-directory", temp_dir, tex_path], temp_dir, tex_path, pdf_path)
+        if process.returncode != 0 or not os.path.exists(pdf_path):
+            stderr = process.stderr.decode("utf-8", errors="ignore") if process.stderr else ""
+            stdout = process.stdout.decode("utf-8", errors="ignore") if process.stdout else ""
+            raise Exception("Failed to compile LaTeX.\nLogs: " + stderr + "\n" + stdout)
             
         return FileResponse(path=pdf_path, filename="VidSage_Custom.pdf", media_type="application/pdf")
     except Exception as e:
@@ -158,6 +171,21 @@ def generate_masterclass_notes(request: NotesRequest):
             request.video_id, output_format=request.output_format
         )
         return notebook_json
+    except ValueError as e:
+        message = str(e)
+        if "Video not indexed" in message:
+            job = job_manager.get_job(request.video_id) or {}
+            result = job.get("result") or {}
+            segments = result.get("segments")
+
+            if segments:
+                rag_service.index_video(request.video_id, segments)
+                notebook_json = rag_service.generate_masterclass_notebook(
+                    request.video_id, output_format=request.output_format
+                )
+                return notebook_json
+
+        raise HTTPException(status_code=500, detail=message)
     except RateLimitError as rte:
         raise HTTPException(
             status_code=429,
