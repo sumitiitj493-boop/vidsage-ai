@@ -110,15 +110,8 @@ class RAGService:
             end_str = self._format_timestamp(chunk["end"])
             context_pieces.append(f"[Time: {start_str}-{end_str}]\n{chunk['text']}")
             
-        context = "
-
-".join(context_pieces)
-        prompt = f"You are an AI Tutor.
-CONTEXT:
-{context}
-
-QUESTION: {question}
-ANSWER:"
+        context = "\n\n".join(context_pieces)
+        prompt = f"You are an AI Tutor.\nCONTEXT:\n{context}\n\nQUESTION: {question}\nANSWER:"
 
         try:
             response = self.groq_client.chat.completions.create(
@@ -147,15 +140,8 @@ ANSWER:"
             end_str = self._format_timestamp(chunk["end"])
             context_pieces.append(f"[Time: {start_str}-{end_str}]\n{chunk['text']}")
             
-        context = "
-
-".join(context_pieces)
-        prompt = f"You are an AI Tutor.
-CONTEXT:
-{context}
-
-QUESTION: {question}
-ANSWER:"
+        context = "\n\n".join(context_pieces)
+        prompt = f"You are an AI Tutor.\nCONTEXT:\n{context}\n\nQUESTION: {question}\nANSWER:"
 
         try:
             self._ensure_runtime()
