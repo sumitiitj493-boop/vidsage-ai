@@ -1,0 +1,51 @@
+# =============================================================
+# VidSage — Render Blueprint
+# Auto-configures the backend on Render
+# Place this in your repo root
+# =============================================================
+
+services:
+  - type: web
+    name: vidsage-backend
+    runtime: docker
+    plan: free
+    dockerfilePath: ./backend/Dockerfile.render
+    dockerContext: ./backend
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: PORT
+        value: 10000
+      - key: REDIS_URL
+        sync: false  # Set manually: Upstash Redis URL
+      - key: FRONTEND_URL
+        sync: false  # Set manually: Vercel URL
+      - key: GROQ_API_KEY
+        sync: false  # Set manually: Your Groq key
+      - key: WHISPER_MODEL_SIZE
+        value: base
+      - key: WHISPER_DEVICE
+        value: cpu
+      - key: WHISPER_COMPUTE_TYPE
+        value: auto
+      - key: CLEANING_MODEL
+        value: llama-3.1-8b-instant
+      - key: AUTH_ENABLED
+        value: "true"
+      - key: AUTH_USERNAME
+        sync: false
+      - key: AUTH_PASSWORD
+        value: ""
+      - key: AUTH_PASSWORD_HASH
+        sync: false  # Generate with: python generate_secrets.py
+      - key: AUTH_SECRET_KEY
+        sync: false  # Generate with: python generate_secrets.py
+      - key: AUTH_COOKIE_SECURE
+        value: "false"
+      - key: DOWNLOAD_DIR
+        value: /opt/render/project/src/app/downloads
+      - key: UPLOAD_DIR
+        value: /opt/render/project/src/app/uploads
+      - key: CHROMA_DB_DIR
+        value: /opt/render/project/src/chroma_db
+    healthCheckPath: /health

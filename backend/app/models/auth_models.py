@@ -18,6 +18,10 @@ class RefreshRequest(BaseModel):
 
 class MeResponse(BaseModel):
     username: str
+    email: str | None = None
+    name: str | None = None
+    picture: str | None = None
+    provider: str | None = None
 
 
 class LogoutResponse(BaseModel):

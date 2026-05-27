@@ -102,11 +102,12 @@ export default function LandingView({ processor, fileInputRef, audioInputRef }: 
       if (mode === "pdf") {
         processor.setPdfFile(file);
         processor.setInputMode("pdf");
+        processor.processVideo({ overrideMode: "pdf", overrideFile: file });
       } else {
         processor.setAudioFile(file);
         processor.setInputMode("audio");
+        processor.processVideo({ overrideMode: "audio", overrideFile: file });
       }
-      setTimeout(() => processor.processVideo({}), 100);
     }
   };
 

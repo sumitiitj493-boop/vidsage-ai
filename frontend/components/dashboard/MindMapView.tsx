@@ -1,13 +1,65 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import mermaid from "mermaid";
 import { Loader2, AlertCircle, RefreshCw, Download, ZoomIn, ZoomOut, Maximize, Minimize } from "lucide-react";
 import { authFetch, getApiBase } from "../../lib/auth";
 
 interface MindMapViewProps {
   videoId: string | null;
 }
+
+const normalizeMermaidCode = (rawCode: string) => {
+  let code = rawCode.replace(/```mermaid/g, "").replace(/```/g, "").trim();
+
+  const graphStart = code.search(/^(graph|flowchart)\s+TD\b/im);
+  if (graphStart > 0) {
+    code = code.slice(graphStart);
+  }
+
+  const normalizedLines: string[] = [];
+  let graphStarted = false;
+
+  for (const originalLine of code.split(/\r?\n/)) {
+    let line = originalLine.trim();
+    if (!line) continue;
+
+    if (/^(graph|flowchart)\s+TD\b/i.test(line)) {
+      if (!graphStarted) {
+        normalizedLines.push("graph TD");
+        graphStarted = true;
+      }
+      continue;
+    }
+
+    if (!graphStarted) continue;
+
+    line = line.replace(/(?<=[\]\}\)])\s+(?=[A-Za-z][A-Za-z0-9_]*\s*-->)/g, "\n");
+
+    for (const part of line.split(/\n+/)) {
+      const trimmed = part.trim();
+      if (!trimmed) continue;
+
+      const edgeMatch = trimmed.match(/^([A-Za-z][A-Za-z0-9_]*\s*-->\s*[A-Za-z][A-Za-z0-9_]*(?:\[[^\]]*\]|\{[^}]*\}|\([^)]*\))?)/);
+      const nodeMatch = trimmed.match(/^([A-Za-z][A-Za-z0-9_]*(?:\[[^\]]*\]|\{[^}]*\}|\([^)]*\)))/);
+
+      if (edgeMatch) {
+        normalizedLines.push(edgeMatch[1]);
+      } else if (nodeMatch) {
+        normalizedLines.push(nodeMatch[1]);
+      }
+    }
+  }
+
+  if (!normalizedLines.length) {
+    return "graph TD\n  A[Error] --> B[Invalid Data]";
+  }
+
+  if (normalizedLines[0] !== "graph TD") {
+    normalizedLines.unshift("graph TD");
+  }
+
+  return Array.from(new Set(normalizedLines)).join("\n");
+};
 
 export default function MindMapView({ videoId }: MindMapViewProps) {
   const [graphCode, setGraphCode] = useState<string | null>(null);
@@ -33,10 +85,7 @@ export default function MindMapView({ videoId }: MindMapViewProps) {
       }
       const data = await res.json();
 
-      let code = data.mermaid || "graph TD\\n  A[Error] --> B[Invalid Data]";
-
-      // Robust error stripping logic: remove triple backticks if present
-      code = code.replace(/```mermaid/g, '').replace(/```/g, '').trim();
+      let code = normalizeMermaidCode(data.mermaid || "graph TD\n  A[Error] --> B[Invalid Data]");
       setGraphCode(code);
       if (cacheKey) {
         sessionStorage.setItem(cacheKey, code);
@@ -52,19 +101,48 @@ export default function MindMapView({ videoId }: MindMapViewProps) {
 
   const renderMermaid = async (code: string) => {
     try {
-      mermaid.initialize({
-        startOnLoad: false,
-        theme: "dark",
-        securityLevel: "loose",
-        flowchart: { htmlLabels: true, curve: "basis" }
-      });
-      const id = "mermaid-graph-" + Date.now();
-      const { svg } = await mermaid.render(id, code);
-      setSvgCode(svg);
+      // Ensure mermaid is available globally
+      if (typeof window !== 'undefined' && !(window as any).mermaid) {
+        // Wait for mermaid to load from CDN
+        await new Promise(resolve => {
+          const checkMermaid = setInterval(() => {
+            if ((window as any).mermaid) {
+              clearInterval(checkMermaid);
+              resolve(null);
+            }
+          }, 100);
+          // Timeout after 5 seconds
+          setTimeout(() => clearInterval(checkMermaid), 5000);
+        });
+      }
+
+      // Initialize mermaid with proper configuration
+      if (typeof window !== 'undefined' && (window as any).mermaid) {
+        const mermaidInstance = (window as any).mermaid;
+        mermaidInstance.initialize({
+          startOnLoad: false,
+          theme: "dark",
+          securityLevel: "loose",
+          flowchart: { 
+            htmlLabels: true, 
+            curve: "basis",
+            useMaxWidth: true
+          },
+          // Ensure diagram renders properly
+          logLevel: "error"
+        });
+
+        const id = "mermaid-graph-" + Date.now();
+        const { svg } = await mermaidInstance.render(id, code);
+        setSvgCode(svg);
+      } else {
+        // Fallback if mermaid fails to load
+        setError("Mermaid library failed to load. Please refresh the page.");
+      }
     } catch (err: any) {
       console.error("Mermaid Render Error:", err);
-      // Fallback: If it still fails, the LLM gave us broken syntax despite our prompt.
-      setError("AI generated invalid graph syntax. Please try regenerating.");
+      // Provide more helpful error message
+      setError(`Graph rendering failed: ${err.message || "Invalid syntax"}. Please try regenerating.`);
     }
   };
 
@@ -196,12 +274,6 @@ export default function MindMapView({ videoId }: MindMapViewProps) {
             >
               Try Regenerating
             </button>
-            <div className="mt-8 text-left w-full max-w-2xl">
-              <p className="text-xs text-slate-500 mb-2">Raw Failed Code (For debugging):</p>
-              <pre className="text-[10px] text-amber-500 bg-black/50 p-4 rounded-lg overflow-x-auto">
-                {graphCode}
-              </pre>
-            </div>
           </div>
         )}
 

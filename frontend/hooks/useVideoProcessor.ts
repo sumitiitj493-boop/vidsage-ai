@@ -121,7 +121,7 @@ export function useVideoProcessor() {
     }
   }, [apiBase]);
 
-  const processVideo = async (opts: { forceWhisper?: boolean } = {}) => {
+  const processVideo = async (opts: { forceWhisper?: boolean; overrideMode?: InputMode; overrideFile?: File } = {}) => {
     setStage("processing");
     setDownloadState({ status: "loading" });
     setSuggestedQuestions([]);
@@ -130,10 +130,14 @@ export function useVideoProcessor() {
     setAudioProgress(null);
     setIsWhisperActive(!!opts.forceWhisper);
 
+    const currentMode = opts.overrideMode || inputMode;
+    const currentPdfFile = opts.overrideMode === "pdf" && opts.overrideFile ? opts.overrideFile : pdfFile;
+    const currentAudioFile = opts.overrideMode === "audio" && opts.overrideFile ? opts.overrideFile : audioFile;
+
     try {
       let data: any;
 
-      if (inputMode === "youtube") {
+      if (currentMode === "youtube") {
         const rawUrl = videoUrl.trim();
         const normalizedUrl = rawUrl.startsWith("http") ? rawUrl : `https://${rawUrl}`;
 
@@ -161,10 +165,10 @@ export function useVideoProcessor() {
           pollAudioStatus(data.job_id);
           return;
         }
-      } else if (inputMode === "pdf") {
-        if (!pdfFile) throw new Error("Select a PDF file first.");
+      } else if (currentMode === "pdf") {
+        if (!currentPdfFile) throw new Error("Select a PDF file first.");
         const form = new FormData();
-        form.append("file", pdfFile);
+        form.append("file", currentPdfFile);
         const res = await authFetch(`${apiBase}/api/pdf/upload`, {
           method: "POST",
           body: form,
@@ -174,10 +178,10 @@ export function useVideoProcessor() {
           throw new Error(errorData?.detail || errorData?.message || "Failed to upload PDF");
         }
         data = await res.json();
-      } else if (inputMode === "audio") {
-        if (!audioFile) throw new Error("Select an audio file first.");
+      } else if (currentMode === "audio") {
+        if (!currentAudioFile) throw new Error("Select an audio file first.");
         const form = new FormData();
-        form.append("file", audioFile);
+        form.append("file", currentAudioFile);
         if (opts.forceWhisper) {
           form.append("force_whisper", "true");
         }
@@ -204,7 +208,7 @@ export function useVideoProcessor() {
       setDownloadState({ status: "done", response: data });
 
       let rawText = "";
-      if (inputMode === "pdf") {
+      if (currentMode === "pdf") {
         rawText = data.raw_text || data.cleaned_text || "";
       } else if (Array.isArray(data.segments) && data.segments.length > 0) {
         let chunkStartTime = data.segments[0].start;
@@ -236,7 +240,7 @@ export function useVideoProcessor() {
       }
 
       setTranscriptText(rawText);
-      if (inputMode !== "audio") {
+      if (currentMode !== "audio") {
         setStage("ready");
       }
       try {

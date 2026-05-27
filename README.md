@@ -26,7 +26,7 @@ Run the API from the `backend` directory:
 python -m venv .venv
 . .venv/Scripts/activate    # Windows
 pip install -r requirements.txt
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload --reload-exclude "chroma_db/*"
 ```
 
 Start Redis (Docker example):

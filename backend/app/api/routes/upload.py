@@ -51,11 +51,9 @@ async def upload_and_start_transcription(
     background_tasks.add_task(_perform_job, job_id, upload_result.file_path, force_whisper)
 
     return {
-        "success": True,
-        "message": "File uploaded successfully. Transcription started in background.",
+        "status": "processing",
         "job_id": job_id,
-        "file_size_mb": upload_result.file_size_mb,
-        "timestamp": datetime.now().isoformat()
+        "message": "Audio uploaded successfully. Whisper is transcribing..."
     }
 
 

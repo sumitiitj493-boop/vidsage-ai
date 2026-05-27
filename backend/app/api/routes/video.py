@@ -13,6 +13,7 @@ from app.services.transcript_quality_checker import TranscriptQualityChecker
 from app.services.rag_service import rag_service  # When a video is successfully processed, we want to immediately save it to the RAG vector database.
 from app.services.job_manager import job_manager
 from app.tasks.transcription_tasks import _perform_youtube_whisper_job
+from app.tasks.transcription_tasks import _perform_whisper_on_file
 
 router = APIRouter(prefix="/api/video", tags=["Video Operations"])
 logger = logging.getLogger(__name__)
@@ -186,7 +187,16 @@ async def download_video(request: VideoRequest, background_tasks: BackgroundTask
 
         elif not request.force_whisper:
             # No YouTube transcript found and force_whisper is False
-            logger.warning("No YouTube transcript found. Prompting user to try Whisper.")
+            is_429 = youtube_result.get("is_429", False)
+            logger.warning(f"No YouTube transcript found (429: {is_429}). Prompting user to try Whisper.")
+            
+            if is_429:
+                raw_text = f"# ⚠️ YouTube IP Blocked\n\nYouTube is currently blocking transcript requests from this server's IP address due to rate limiting.\n\n**To bypass this and generate the transcript, please click the \"Try Whisper AI\" button in the Sidebar.**"
+                cleaned_text = raw_text
+            else:
+                raw_text = f"# ⚠️ No Transcript Available\n\nYouTube does not have any captions or transcripts available for **{video_title}**.\n\n**To generate one from scratch, please click the \"Try Whisper AI\" button in the Sidebar.**"
+                cleaned_text = raw_text
+            
             return {
                 "success": True,
                 "requires_whisper": True,
@@ -194,8 +204,8 @@ async def download_video(request: VideoRequest, background_tasks: BackgroundTask
                 "video_id": video_id,
                 "processing_time_seconds": round(time.time() - start_time, 2),
                 "routing": "no_youtube_transcript",
-                "raw_text": f"# ⚠️ No Transcript Available\n\nYouTube does not have any captions or transcripts available for **{video_title}**.\n\n**To generate one from scratch, please click the \"Try Whisper AI\" button in the Sidebar.**",
-                "cleaned_text": f"# ⚠️ No Transcript Available\n\nYouTube does not have any captions or transcripts available for **{video_title}**.\n\n**To generate one from scratch, please click the \"Try Whisper AI\" button in the Sidebar.**",
+                "raw_text": raw_text,
+                "cleaned_text": cleaned_text,
                 "segments": []
             }
 

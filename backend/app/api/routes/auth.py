@@ -1,4 +1,8 @@
+import secrets
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.responses import RedirectResponse
 
 from app.api.deps import require_auth
 from app.config import settings
@@ -10,6 +14,8 @@ from app.security import (
     verify_login_credentials,
     verify_refresh_token,
 )
+from app.services.google_oauth import build_google_auth_url, exchange_google_code, fetch_google_profile
+from app.services.user_store import upsert_oauth_user
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
@@ -44,9 +50,10 @@ def _clear_auth_cookies(response: Response) -> None:
     response.delete_cookie(key=settings.AUTH_REFRESH_COOKIE_NAME, path="/api/auth")
 
 
-def _build_token_response(username: str, response: Response) -> TokenResponse:
+def _build_token_response(username: str, response: Response, extra_claims: dict | None = None) -> TokenResponse:
+    extra_claims = extra_claims or {}
     access_token = create_access_token(
-        {"sub": username},
+        {"sub": username, **extra_claims},
         expire_minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES,
     )
     refresh_token = create_refresh_token(username)
@@ -61,6 +68,22 @@ def _build_token_response(username: str, response: Response) -> TokenResponse:
 def _rate_limit_key(request: Request, username: str) -> str:
     client_host = request.client.host if request.client else "unknown"
     return f"{client_host}:{username.lower().strip()}"
+
+
+def _frontend_redirect_path(path: str | None) -> str:
+    normalized = (path or "/dashboard").strip()
+    if not normalized.startswith("/"):
+        return "/dashboard"
+    return normalized
+
+
+def _oauth_login_redirect(reason: str) -> RedirectResponse:
+    target = f"{settings.FRONTEND_URL}/login?reason={quote(reason)}"
+    return RedirectResponse(url=target, status_code=status.HTTP_302_FOUND)
+
+
+def _google_redirect_uri(request: Request) -> str:
+    return settings.GOOGLE_REDIRECT_URI.strip() or str(request.url_for("google_callback"))
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -81,7 +104,105 @@ def login(payload: LoginRequest, request: Request, response: Response):
         )
 
     auth_rate_limiter.clear(rate_key)
-    return _build_token_response(username=payload.username, response=response)
+    return _build_token_response(
+        username=payload.username,
+        response=response,
+        extra_claims={"email": payload.username, "name": payload.username, "provider": "local"},
+    )
+
+
+@router.get("/google")
+def google_login(request: Request, next: str | None = "/dashboard"):
+    if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
+        return _oauth_login_redirect("google_oauth_not_configured")
+
+    state = secrets.token_urlsafe(32)
+    next_path = _frontend_redirect_path(next)
+    redirect_uri = _google_redirect_uri(request)
+    auth_url = build_google_auth_url(state=state, redirect_uri=redirect_uri)
+
+    response = RedirectResponse(url=auth_url, status_code=status.HTTP_302_FOUND)
+    same_site = settings.AUTH_COOKIE_SAMESITE if settings.AUTH_COOKIE_SAMESITE in {"lax", "strict", "none"} else "lax"
+    response.set_cookie(
+        key=settings.GOOGLE_OAUTH_STATE_COOKIE_NAME,
+        value=state,
+        max_age=10 * 60,
+        httponly=True,
+        secure=settings.AUTH_COOKIE_SECURE,
+        samesite=same_site,
+        path="/api/auth",
+    )
+    response.set_cookie(
+        key=settings.GOOGLE_OAUTH_NEXT_COOKIE_NAME,
+        value=next_path,
+        max_age=10 * 60,
+        httponly=True,
+        secure=settings.AUTH_COOKIE_SECURE,
+        samesite=same_site,
+        path="/api/auth",
+    )
+    return response
+
+
+@router.get("/google/callback")
+def google_callback(request: Request):
+    error = request.query_params.get("error")
+    if error:
+        return _oauth_login_redirect("google_oauth_cancelled")
+
+    code = request.query_params.get("code")
+    state = request.query_params.get("state")
+    cookie_state = request.cookies.get(settings.GOOGLE_OAUTH_STATE_COOKIE_NAME)
+    next_path = _frontend_redirect_path(request.cookies.get(settings.GOOGLE_OAUTH_NEXT_COOKIE_NAME))
+
+    if not code or not state or not cookie_state or state != cookie_state:
+        return _oauth_login_redirect("google_oauth_invalid_state")
+
+    try:
+        token_payload = exchange_google_code(code=code, redirect_uri=_google_redirect_uri(request))
+        access_token = token_payload.get("access_token")
+        if not access_token:
+            raise RuntimeError("Google did not return an access token")
+
+        profile = fetch_google_profile(str(access_token))
+        google_id = str(profile.get("sub", "")).strip()
+        email = str(profile.get("email", "")).strip().lower()
+        name = str(profile.get("name", "")).strip() or email
+        picture = str(profile.get("picture", "")).strip()
+
+        if not google_id or not email:
+            raise RuntimeError("Google profile is missing required fields")
+
+        user = upsert_oauth_user(
+            provider="google",
+            provider_user_id=google_id,
+            email=email,
+            name=name,
+            picture=picture,
+        )
+
+        frontend_target = f"{settings.FRONTEND_URL}{next_path}"
+        response = RedirectResponse(url=frontend_target, status_code=status.HTTP_302_FOUND)
+        _set_auth_cookies(
+            response=response,
+            access_token=create_access_token(
+                {
+                    "sub": f"google:{user['provider_user_id']}",
+                    "email": user.get("email", email),
+                    "name": user.get("name") or name,
+                    "picture": user.get("picture") or picture,
+                    "provider": "google",
+                },
+                expire_minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES,
+            ),
+            refresh_token=create_refresh_token(f"google:{user['provider_user_id']}"),
+        )
+
+        response.delete_cookie(key=settings.GOOGLE_OAUTH_STATE_COOKIE_NAME, path="/api/auth")
+        response.delete_cookie(key=settings.GOOGLE_OAUTH_NEXT_COOKIE_NAME, path="/api/auth")
+        return response
+    except Exception as exc:
+        return _oauth_login_redirect(f"google_oauth_failed_{exc.__class__.__name__.lower()}")
 
 
 @router.post("/refresh", response_model=TokenResponse)
@@ -121,4 +242,10 @@ def logout(response: Response):
 
 @router.get("/me", response_model=MeResponse)
 def me(current_user: dict = Depends(require_auth)):
-    return MeResponse(username=current_user.get("sub", "unknown"))
+    return MeResponse(
+        username=current_user.get("sub", "unknown"),
+        email=current_user.get("email"),
+        name=current_user.get("name"),
+        picture=current_user.get("picture"),
+        provider=current_user.get("provider"),
+    )

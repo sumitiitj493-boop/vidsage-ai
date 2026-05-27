@@ -140,3 +140,43 @@ a {
   padding: 0.15rem 0.25rem;
   border-radius: 0.35rem;
 }
+
+@media print {
+  * {
+    background: transparent !important;
+    color: black !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  html, body {
+    background: white !important;
+    margin: 0;
+    padding: 0;
+  }
+
+  a, a:visited {
+    text-decoration: underline;
+  }
+
+  pre, blockquote {
+    border: 1px solid #999;
+    page-break-inside: avoid;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
+  tr, img {
+    page-break-inside: avoid;
+  }
+
+  img {
+    max-width: 100% !important;
+  }
+
+  @page {
+    margin: 1cm;
+  }
+}

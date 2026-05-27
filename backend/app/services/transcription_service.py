@@ -1,175 +1,175 @@
-from faster_whisper import WhisperModel
-from pathlib import Path
-from typing import Optional, List
-from dataclasses import dataclass
+"""
+VidSage — Groq Whisper API Transcription Service
+
+Uses Groq's free Whisper API instead of local faster-whisper.
+This eliminates the 2-4GB RAM requirement.
+
+Groq free tier:
+- whisper-large-v3 model
+- ~30 seconds per 10-minute audio
+- No rate limit on free tier (reasonable use)
+- Fastest Whisper API available
+"""
+
 import logging
-import re
+import os
+import tempfile
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class TranscriptSegment:
-    start: float
-    end: float
-    text: str
+class GroqTranscriptionService:
+    """
+    Transcription via Groq's Whisper API.
 
+    Falls back to local faster-whisper if Groq is unavailable.
+    """
 
-@dataclass
-class TranscriptionResult:
-    text: str
-    segments: List[TranscriptSegment]
-    language: str
-    duration: float
+    def __init__(self):
+        self._groq_client = None
+        self._groq_available = False
+        self._local_whisper_available = False
+        self._model = None
 
+    def _init_groq(self):
+        """Initialize Groq client lazily."""
+        if self._groq_client is not None:
+            return
 
-class TranscriptionService:
+        api_key = os.getenv("GROQ_API_KEY", "")
+        if not api_key:
+            logger.warning("GROQ_API_KEY not set, Groq transcription unavailable")
+            return
 
-    def __init__(
-        self,
-        model_size: str = "base",
-        device: str = "cpu",
-        compute_type: str = "auto"
-    ):
-        logger.info(f"Loading Faster-Whisper model: {model_size}")
-        import multiprocessing
-        import ctranslate2 as ct
-        
-        requested_device = (device or "cpu").strip().lower()
-        resolved_device = "cpu"
+        try:
+            from groq import Groq
+            self._groq_client = Groq(api_key=api_key)
+            self._groq_available = True
+            logger.info("✅ Groq Whisper API initialized")
+        except Exception as e:
+            logger.warning(f"Groq init failed: {e}")
+            self._groq_available = False
 
-        if requested_device in {"cuda", "auto"}:
-            try:
-                cuda_devices = ct.get_cuda_device_count()
-            except Exception:
-                cuda_devices = 0
-            if cuda_devices > 0:
-                resolved_device = "cuda"
-            elif requested_device == "cuda":
-                logger.warning("CUDA requested but no CUDA device found. Falling back to CPU.")
+    def _init_local_whisper(self):
+        """Initialize local faster-whisper as fallback."""
+        if self._model is not None:
+            return
 
-        resolved_compute_type = (compute_type or "auto").strip().lower()
-        if resolved_compute_type == "auto":
-            resolved_compute_type = "float16" if resolved_device == "cuda" else "int8"
+        try:
+            from faster_whisper import WhisperModel
+            model_size = os.getenv("WHISPER_MODEL_SIZE", "base")
+            device = os.getenv("WHISPER_DEVICE", "cpu")
+            compute_type = os.getenv("WHISPER_COMPUTE_TYPE", "auto")
 
-        import os
-        os.environ["OMP_NUM_THREADS"] = str(max(1, multiprocessing.cpu_count() // 2))
-
-        # Avoid CPU oversubscription; too many workers can slow real-world throughput.
-        cpu_count = max(1, multiprocessing.cpu_count())
-        threads = max(1, cpu_count - 1) if resolved_device == "cpu" else max(1, cpu_count // 2)
-        workers = min(4, max(1, cpu_count // 2)) if resolved_device == "cpu" else 1
-
-        logger.info(
-            "Whisper runtime resolved: device=%s compute_type=%s cpu_threads=%s workers=%s",
-            resolved_device,
-            resolved_compute_type,
-            threads,
-            workers,
-        )
-        
-        self.model = WhisperModel(
-            model_size,
-            device=resolved_device,
-            compute_type=resolved_compute_type,
-            cpu_threads=threads,
-            num_workers=workers
-        )
-        self.model_size = model_size
-        logger.info("Model loaded successfully!")
-
-    def _filter_english_text(self, text: str) -> str:
-        # Keep only ASCII letters/digits/basic punctuation/spaces/newlines
-        return re.sub(r"[^A-Za-z0-9\-\.,;:!\?\(\)\[\]\'\"\s]", "", text)
-
-    def _translate_to_english(self, text: str) -> str:
-        # Placeholder translation: if non-ascii content exists, drop non-latin chars.
-        # You can replace this method with a real translator backend later.
-        if re.search(r"[^\x00-\x7F]", text):
-            logger.info("Transcription contains non-ASCII content; applying fallback English translation/cleanup.")
-            return self._filter_english_text(text)
-        return text
+            logger.info(f"Loading local Whisper: {model_size} on {device}")
+            self._model = WhisperModel(model_size, device=device, compute_type=compute_type)
+            self._local_whisper_available = True
+            logger.info("✅ Local Whisper model loaded")
+        except Exception as e:
+            logger.warning(f"Local Whisper init failed: {e}")
+            self._local_whisper_available = False
 
     def transcribe(
         self,
         audio_path: str,
         language: Optional[str] = None,
-        progress_callback=None,
-        english_only: bool = False,
-        translate_to_english: bool = False,
-        force_accuracy: bool = False
-    ) -> TranscriptionResult:
+    ) -> dict:
+        """
+        Transcribe audio file. Returns dict with segments and full text.
 
-        path = Path(audio_path)
+        Tries Groq API first, falls back to local Whisper.
+        """
+        # Try Groq first (cloud, fast, low memory)
+        self._init_groq()
+        if self._groq_available:
+            try:
+                result = self._transcribe_groq(audio_path, language)
+                result["engine"] = "groq_api"
+                return result
+            except Exception as e:
+                logger.warning(f"Groq transcription failed, trying local: {e}")
 
-        if not path.exists():
-            raise FileNotFoundError(f"Audio file not found: {audio_path}")
+        # Fallback to local Whisper
+        self._init_local_whisper()
+        if self._local_whisper_available:
+            try:
+                result = self._transcribe_local(audio_path, language)
+                result["engine"] = "local_whisper"
+                return result
+            except Exception as e:
+                logger.error(f"Local Whisper also failed: {e}")
 
-        # Debug: Indicate start of transcription loop
-        print(f"[DEBUG] Starting transcription loop for: {audio_path} (High Accuracy: {force_accuracy})", flush=True)
+        return {
+            "text": "",
+            "segments": [],
+            "language": language or "unknown",
+            "engine": "none",
+            "error": "Both Groq API and local Whisper failed",
+        }
 
-        segments_generator, info = self.model.transcribe(
-            str(audio_path),
-            language=language,
-            vad_filter=True,
-            vad_parameters=dict(min_silence_duration_ms=1800 if force_accuracy else 700),
-            beam_size=5 if force_accuracy else 1,  # Beam search only when accuracy is explicitly requested.
-            best_of=5 if force_accuracy else 1,
-            condition_on_previous_text=force_accuracy,
-            temperature=0,
-        )
+    def _transcribe_groq(self, audio_path: str, language: Optional[str]) -> dict:
+        """Transcribe using Groq's Whisper API."""
+        filename = os.path.basename(audio_path)
+
+        with open(audio_path, "rb") as audio_file:
+            kwargs = {
+                "model": "whisper-large-v3",
+                "file": (filename, audio_file, "audio/mpeg"),
+                "response_format": "verbose_json",
+                "temperature": 0.0,
+            }
+            if language:
+                kwargs["language"] = language
+
+            response = self._groq_client.audio.transcriptions.create(**kwargs)
+
+        # Parse response
+        segments = []
+        if hasattr(response, "segments") and response.segments:
+            for seg in response.segments:
+                segments.append({
+                    "start": seg.get("start", 0) if isinstance(seg, dict) else getattr(seg, "start", 0),
+                    "end": seg.get("end", 0) if isinstance(seg, dict) else getattr(seg, "end", 0),
+                    "text": seg.get("text", "") if isinstance(seg, dict) else getattr(seg, "text", ""),
+                })
+
+        text = response.text if hasattr(response, "text") else str(response)
+        lang = getattr(response, "language", language or "unknown")
+
+        logger.info(f"Groq transcription complete: {len(text)} chars, {len(segments)} segments")
+
+        return {
+            "text": text,
+            "segments": segments,
+            "language": lang,
+        }
+
+    def _transcribe_local(self, audio_path: str, language: Optional[str]) -> dict:
+        """Transcribe using local faster-whisper (fallback)."""
+        kwargs = {}
+        if language:
+            kwargs["language"] = language
+
+        segments_iter, info = self._model.transcribe(audio_path, **kwargs)
 
         segments = []
-        full_text = []
+        for seg in segments_iter:
+            segments.append({
+                "start": seg.start,
+                "end": seg.end,
+                "text": seg.text,
+            })
 
-        # Estimate total duration for progress (fallback to 0 if not available) 
-        total_duration = getattr(info, 'duration', 0) or 0
-        last_percent = -1
+        text = " ".join(s["text"] for s in segments)
+        logger.info(f"Local transcription complete: {len(text)} chars, {len(segments)} segments")
 
-        # Always print 0% at start
-        if progress_callback:
-            progress_callback(0)
+        return {
+            "text": text,
+            "segments": segments,
+            "language": info.language if hasattr(info, "language") else (language or "unknown"),
+        }
 
-        for segment in segments_generator:
-            segments.append(
-                TranscriptSegment(
-                    start=segment.start,
-                    end=segment.end,
-                    text=segment.text.strip()
-                )
-            )
-            full_text.append(segment.text.strip())
 
-            # Progress reporting
-            if total_duration > 0 and progress_callback:
-                percent = int(100 * min(segment.end, total_duration) / total_duration)
-                if percent != last_percent and percent % 5 == 0:
-                    progress_callback(percent)
-                    last_percent = percent
-
-        # Ensure 100% is reported
-        if progress_callback:
-            progress_callback(100)
-
-        final_text = " ".join(full_text)
-
-        if translate_to_english:
-            final_text = self._translate_to_english(final_text)
-            # Also update segments text similarly
-            for seg in segments:
-                seg.text = self._translate_to_english(seg.text)
-
-        if english_only:
-            final_text = self._filter_english_text(final_text)
-            for seg in segments:
-                seg.text = self._filter_english_text(seg.text)
-
-        # Remove left-over repeated whitespace
-        final_text = re.sub(r"\s+", " ", final_text).strip()
-
-        return TranscriptionResult(
-            text=final_text,
-            segments=segments,
-            language=info.language,
-            duration=info.duration
-        )
+# Singleton
+transcription_service = GroqTranscriptionService()

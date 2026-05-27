@@ -1,0 +1,50 @@
+# ============================================
+# VidSage Backend — Render Free Tier Dockerfile
+# Optimized for 512MB RAM, $0/month
+#
+# KEY OPTIMIZATIONS:
+# - Uses Groq API for transcription (no local Whisper)
+# - Runs Celery worker + FastAPI in same container
+# - Minimal dependencies, slim image
+# - Total memory: ~300-400MB (fits free tier)
+# ============================================
+
+FROM python:3.11-slim
+
+# Install ffmpeg (for audio preprocessing) + curl (healthcheck)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python dependencies (excluding heavy ML libs we don't need)
+COPY requirements.render.txt requirements.txt
+
+# Install only what's needed — faster-whisper is kept for fallback
+# but Groq API will be primary for free tier
+RUN pip install --no-cache-dir -r requirements.txt \
+    gunicorn>=21.2.0 \
+    bcrypt>=4.1.0
+
+# Copy application code
+COPY . .
+
+# Create data directories
+RUN mkdir -p /app/app/downloads /app/app/uploads /app/chroma_db
+
+# Render sets PORT env variable automatically
+ENV PORT=10000
+
+# Render uses a startup script to run both FastAPI + Celery
+# This script is called instead of a single CMD
+COPY render-start.sh /app/render-start.sh
+RUN chmod +x /app/render-start.sh
+
+# Health check — Render uses this to verify service is up
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+    CMD curl -f http://localhost:${PORT:-10000}/health || exit 1
+
+# Start both services
+CMD ["/app/render-start.sh"]

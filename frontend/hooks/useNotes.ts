@@ -134,10 +134,23 @@ export function useNotes(videoId: string | undefined | null, videoTitle: string,
     @media print {
       body { padding: 0; background-color: white; }
       .notes-container { max-width: 100%; top: 0 !important; margin: 0 !important; }
-      .notebook-cell { border: none; padding: 0; margin-bottom: 30px; box-shadow: none; page-break-inside: avoid; }
-      .notes-header { box-shadow: none; border-left: 4px solid #a371f7; background: #f6f8fa; }
-      .notes-header h1 { color: #000; }
+      .notebook-cell { border: none; padding: 0; margin-bottom: 30px; box-shadow: none; page-break-inside: avoid; background: white !important; }
+      .notes-header { box-shadow: none; border-left: 4px solid #a371f7; background: #f6f8fa !important; }
+      .notes-header h1 { color: #000 !important; }
       .no-print { display: none !important; }
+      * {
+        color: black !important;
+        text-shadow: none !important;
+        background-color: transparent !important;
+      }
+      body *, .markdown-body * {
+        color: black !important;
+      }
+      pre, blockquote, code {
+        border: 1px solid #ccc !important;
+        page-break-inside: avoid;
+      }
+      table, th, td { border: 1px solid #ccc !important; }
     }
   </style>
 </head>
@@ -147,7 +160,7 @@ export function useNotes(videoId: string | undefined | null, videoTitle: string,
   </div>
   <div class="notes-container">
     <div class="notes-header">
-      <h1>🚀 Masterclass Notes</h1>
+      <h1>Masterclass Notes</h1>
       <p>Generated from transcript</p>
     </div>
     <div class="markdown-body">

@@ -6,6 +6,7 @@ from threading import Lock
 import chromadb
 import requests
 from groq import Groq
+import re
 
 from app.config import settings
 
@@ -641,55 +642,164 @@ IMPORTANT INSTRUCTIONS (Use for notebook-quality math notes):
             logger.error(f"Error answering question for video {video_id}: {str(e)}")
             yield f"Error occurred while generating answer: {str(e)}"
 
-    def generate_summary(self, video_id: str) -> str:
-        """Create a highly optimized Markdown revision summary of the entire video."""
+    def generate_summary(self, video_id: str) -> dict:
+        """Create a highly optimized JSON revision summary of the entire video."""
         self._ensure_runtime()
         try:
             collection = self.chroma_client.get_collection(f"video_{video_id}")
             
-            # Fetch a broad sample of chunks (e.g., 25)
-            results = collection.get(limit=25)
+            # Fetch a broad sample of chunks (e.g., 50)
+            results = collection.get(limit=50)
             docs = results["documents"]
-            context = "\n".join(docs)
+            if not docs:
+                return {"error": "No transcript data found for this video."}
+            context = "\n\n".join(docs)
             
-            prompt = f"""
-            You are an expert educator and study guide creator. 
-            Create a highly structured, visually stunning "Revision Summary" of the following video transcript.
-            
-            CRITICAL FORMATTING RULES (STRICTLY REQUIRED):
-            1. PURE MARKDOWN FOR TABLES: Use standard Markdown tables (`| Col | Col |`). Do not wrap tables or headers (`##`) inside any custom tags. Leave them free-floating. 
-            2. INTERACTIVE BLOCKS FOR ALL TEXT: EVERY single paragraph, list, or explanation MUST be wrapped inside one of these custom XML-like tags. Do NOT output free-floating paragraphs.
-               - `<card>Your general explanations or bullet points here...</card>` (Renders as a beautiful interactive Blue/Slate glass card)
-               - `<tip>Your pro-tip here...</tip>` (Renders as a vivid Purple Pro-Tip box)
-               - `<warning>Your warning here...</warning>` (Renders as a deep Red Danger box)
-               - `<important>Your key definition here...</important>` (Renders as a bright Emerald Important box)
-            3. COLORED SUB-HEADERS: For definitions or lists of terms, use `#### ` (Heading 4). Our system automatically colors `#### ` headers in bright Emerald Green!
-               Example: `#### ⚙️ Fixed Partitioning`
-               Do not prefix custom tags with `###` or `####`.
-            4. TECHNICAL BADGES: Wrap technical variables or keywords in standard markdown backticks (` ` `). They will automatically render as pink highlighted badges.
-            5. MATH STYLING: Use precise LaTeX for equations (wrap inline math in `$` and block math in `$$`).
-            6. LANGUAGE: You MUST generate the summary strictly in professional English, no matter what language the transcript is in.
-            
-            MANDATORY SECTIONS (Output exactly with `##`):
-            ## 🌟 Executive Summary
-            ## 📊 Concept Breakdown (Include detailed Markdown tables)
-            ## ⚙️ Core Mechanisms / Processes
-            ## 💡 Key Takeaways & Cheat Sheet
-            
-            TRANSCRIPT CONTEXT:
-            {context}
-            """
-            
+            system_prompt = f"""You are VidSage, an AI that converts YouTube video transcripts into structured revision notes.
+
+Your job has TWO steps. Do not skip step 1.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 1 — DETECT VIDEO TYPE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Read the transcript carefully and classify into ONE of:
+- "educational"     → lecture, explainer, science, history, concept-heavy
+- "tutorial"        → step-by-step how-to, coding walkthrough, recipe, DIY
+- "documentary"     → investigative, biographical, event-based storytelling
+- "news_commentary" → news analysis, podcast, debate, opinion
+- "entertainment"   → comedy, reaction, vlog, gaming, lifestyle
+- "other"           → anything else
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 2 — GENERATE NOTES AS JSON
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Return ONLY a valid JSON object. No explanation. No markdown fences. No text before or after.
+
+{{
+  "video_type": "<type>",
+  "title": "<punchy title max 8 words>",
+  "gist": "<plain English 2-3 sentences what this video is about, written like telling a friend, no jargon>",
+  "main_points": [
+    "<complete sentence of what the video actually said — not your interpretation>",
+    ... 4 to 7 points
+  ],
+  "terms": [
+    {{
+      "word": "<exact term/name/tool used in the video>",
+      "meaning": "<one sentence plain English meaning in the context of this video>"
+    }},
+    ... 0 to 6 terms, omit key entirely if no notable terms
+  ],
+  "memorable": "<the single most quotable or striking insight from the video — 1-2 sentences, written naturally>",
+  "steps": [
+    "<detailed step — include specifics from the transcript like variable names, conditions, edge cases>",
+    ... omit key entirely if video does not teach a process
+  ],
+  "recall_qa": [
+    {{
+      "q": "<specific testable question from the video content>",
+      "a": "<precise answer using details from the transcript>"
+    }},
+    ... 3 to 5 questions, omit key entirely if video has no testable knowledge
+  ],
+  "mistakes": [
+    {{
+      "wrong": "<exactly what people do wrong>",
+      "right": "<exactly what you should do instead>",
+      "why": "<one sentence reason why this matters>"
+    }},
+    ... omit key entirely if video does not warn about errors
+  ],
+  "code_blocks": [
+    {{
+      "label": "<what this code does in plain English>",
+      "language": "<python or cpp or javascript or java or bash — lowercase>",
+      "code": "<the actual complete working code from the video, escape newlines as \\n, escape quotes>"
+    }},
+    ... omit key entirely if no code in video
+  ],
+  "next_steps": [
+    "<specific resource, problem, or action the video recommended>"
+    ... omit key entirely if none mentioned
+  ],
+  "timeline": [
+    {{
+      "period": "<time period or date>",
+      "event": "<what happened>"
+    }},
+    ... omit key entirely if not historical/documentary content
+  ]
+}}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CRITICAL QUALITY RULES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+RULE 1 — DEPTH: Extract real detail from the transcript. If the speaker explained an algorithm step by step, your steps field must reflect those exact steps with the same specificity — not a vague summary. If they wrote actual code, include the actual code — not a skeleton.
+
+RULE 2 — HONESTY: main_points must reflect what the video actually said. Do not add facts from your training data. Do not interpret or embellish.
+
+RULE 3 — CONDITIONAL SECTIONS: Only include a section if it genuinely applies to this video.
+  - steps → only if video teaches a process in sequence
+  - recall_qa → only if video contains testable knowledge (skip for entertainment, vlogs, comedy)
+  - mistakes → only if the speaker explicitly warns about errors or corrects misconceptions
+  - code_blocks → only if actual code or commands appeared in the video
+  - next_steps → only if speaker recommended further resources or actions
+  - timeline → only for historical, biographical, or news story content
+
+RULE 4 — NO EMPTY SECTIONS: Never include a key with an empty array [] or null. Omit the key entirely.
+
+RULE 5 — CODE QUALITY: code_blocks must contain the real code from the video with correct syntax. Never write pseudocode or skeleton code unless that is literally all the speaker showed.
+
+RULE 6 — STEPS DEPTH: Each step in the steps array must be a complete actionable sentence with specifics. Bad: "Create the graph". Good: "Loop through every adjacent pair of words in the dictionary, compare characters one by one, and add a directed edge from the first differing character of word1 to the first differing character of word2."
+
+RULE 7 — RECALL QUALITY: recall_qa questions must target the non-obvious insights — the things a student would get wrong on a test, not basic facts. Include the edge cases and gotchas the speaker mentioned.
+
+RULE 8 — UNIVERSALITY: These rules apply equally to all video types. A cooking tutorial gets detailed steps. A documentary gets timeline. A comedy gets only gist + main_points + memorable and nothing else forced.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TRANSCRIPT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+"""
+
+            system_instruction = system_prompt.split("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nTRANSCRIPT")[0]
+            transcript_content = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nTRANSCRIPT\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n" + context
+
             answer = self.chat_completion(
-                messages=[{"role": "user", "content": prompt}],
+                messages=[
+                    {"role": "system", "content": system_instruction},
+                    {"role": "user", "content": transcript_content},
+                ],
                 model="llama-3.3-70b-versatile",
-                temperature=0.3,
+                temperature=0.1,
             )
             
-            return answer.strip()
+            # Use full_response for safety as requested
+            full_response = answer
+            
+            # Strip any accidental markdown fences the model adds
+            full_response = full_response.strip()
+            if full_response.startswith("```"):
+                full_response = full_response.split("```")[1]
+                if full_response.startswith("json"):
+                    full_response = full_response[4:]
+            full_response = full_response.strip().rstrip("```").strip()
+
+            # Parse JSON
+            import json
+            try:
+                summary_data = json.loads(full_response)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"LLM returned invalid JSON: {e}\nRaw response: {full_response[:500]}")
+                
+            return summary_data
+            
         except Exception as e:
             logger.error(f"Error generating summary for {video_id}: {e}")
-            return f"❌ Error generating summary: {str(e)}"
+            return {"error": f"Error generating summary: {str(e)}"}
 
     def generate_mindmap(self, video_id: str) -> str:
         """Generate a Mermaid.js flowchart (mind map) from the video context."""
@@ -707,13 +817,15 @@ IMPORTANT INSTRUCTIONS (Use for notebook-quality math notes):
             
             CRITICAL MERMAID SYNTAX RULES (FAILURE TO FOLLOW BREAKS THE RENDERER):
             1. ONLY output valid Mermaid code block starting with graph TD. Nothing else. No python code block tags, no ```mermaid or ``` around the output. JUST the graph code.
-            2. Node IDs MUST be simple alphabetic words (A, B, C, Node1, SubNode2). NO spaces, NO dashes, NO special characters.
-            3. Node text MUST be wrapped in brackets [like this].
-            4. Do NOT use double quotes (") or single quotes (') anywhere inside node text. Replace them with spaces or omit them.
-            5. Do NOT use parentheses () or brackets [] inside node text. Use spaces.
-            6. Keep node text concise (max 3-5 words).
-            7. Ensure every connection uses exact syntax: Node1 --> Node2
-            8. Only output the raw text, don't wrap it in anything.
+            2. Put exactly ONE Mermaid statement on each line. Never concatenate multiple nodes or edges on the same line.
+            3. Node IDs MUST be simple alphabetic words (A, B, C, Node1, SubNode2). NO spaces, NO dashes, NO special characters.
+            4. Node text MUST be wrapped in brackets [like this].
+            5. Do NOT use double quotes (\") or single quotes (') anywhere inside node text. Replace them with spaces or omit them.
+            6. Do NOT use parentheses () or brackets [] inside node text. Use spaces.
+            7. Keep node text concise (max 3-5 words).
+            8. Ensure every connection uses exact syntax: Node1 --> Node2
+            9. Do not output any prose, explanation, or markdown outside the graph.
+            10. If you need a chain of concepts, write each edge on its own line.
             
             Example Perfect Output:
             graph TD
@@ -735,11 +847,75 @@ IMPORTANT INSTRUCTIONS (Use for notebook-quality math notes):
             
             # Clean off any potential bolding or code blocks the LLM still tries to add
             answer = answer.replace('```mermaid', '').replace('```', '').strip()
+            answer = self._sanitize_mermaid_graph(answer)
             
             return answer
         except Exception as e:
             logger.error(f"Error generating mindmap for {video_id}: {e}")
             return "graph TD\n  A[Error] --> B[Could not generate graph]"
+
+    def _sanitize_mermaid_graph(self, raw: str) -> str:
+        """Normalize Mermaid flowchart text so common run-on outputs still render."""
+        raw = raw.replace("\r\n", "\n").strip()
+        raw = re.sub(r"^```mermaid\s*|```$", "", raw, flags=re.MULTILINE).strip()
+
+        cleaned_lines: list[str] = []
+        seen_graph_header = False
+
+        for original_line in raw.split("\n"):
+            line = original_line.strip()
+            if not line:
+                continue
+
+            if re.match(r"^(graph|flowchart)\s+TD\b", line, flags=re.IGNORECASE):
+                if not seen_graph_header:
+                    cleaned_lines.append("graph TD")
+                    seen_graph_header = True
+                continue
+
+            if not seen_graph_header:
+                # Skip anything before the graph header unless the model forgot to include it.
+                continue
+
+            if not re.match(r"^(subgraph\b|end\b|style\b|classDef\b|linkStyle\b|click\b|direction\b|%%)", line):
+                # Split common run-on outputs where the model concatenates multiple edge statements.
+                line = re.sub(
+                    r"(?<=[\]\}\)])\s+(?=[A-Za-z][A-Za-z0-9_]*\s*-->)",
+                    "\n",
+                    line,
+                )
+
+            for part in line.split("\n"):
+                part = part.strip()
+                if not part:
+                    continue
+
+                # Keep only the actual Mermaid statement and drop trailing prose.
+                edge_match = re.match(
+                    r"^([A-Za-z][A-Za-z0-9_]*\s*-->\s*[A-Za-z][A-Za-z0-9_]*(?:\[[^\]]*\]|\{[^}]*\}|\([^)]*\))?)",
+                    part,
+                )
+                node_match = re.match(
+                    r"^([A-Za-z][A-Za-z0-9_]*(?:\[[^\]]*\]|\{[^}]*\}|\([^)]*\)))",
+                    part,
+                )
+
+                if edge_match:
+                    cleaned_lines.append(edge_match.group(1))
+                elif node_match:
+                    cleaned_lines.append(node_match.group(1))
+                elif re.match(r"^(subgraph\b|end\b|style\b|classDef\b|linkStyle\b|click\b|direction\b|%%)", part):
+                    cleaned_lines.append(part)
+
+        if not cleaned_lines:
+            return "graph TD\n  A[Error] --> B[Could not generate graph]"
+
+        if cleaned_lines[0] != "graph TD":
+            cleaned_lines.insert(0, "graph TD")
+
+        # De-duplicate while preserving order, then ensure a final newline for Mermaid parsers.
+        cleaned_lines = list(dict.fromkeys(cleaned_lines))
+        return "\n".join(cleaned_lines).strip()
 
 
 
@@ -903,7 +1079,7 @@ IMPORTANT INSTRUCTIONS (Use for notebook-quality math notes):
                 "cell_type": "markdown",
                 "metadata": {},
                 "source": [
-                    "\\section*{🚀 \\textcolor{red}{Masterclass Notes}}\n",
+                    "\\section*{\\textcolor{red}{Masterclass Notes}}\n",
                     "\\textit{Generated from transcript.}\n\n",
                 ],
             })
@@ -912,7 +1088,7 @@ IMPORTANT INSTRUCTIONS (Use for notebook-quality math notes):
                 "cell_type": "markdown",
                 "metadata": {},
                 "source": [
-                    "# 🚀 Masterclass Notes\n\n",
+                    "# Masterclass Notes\n\n",
                     "Generated from transcript.\n\n",
                 ],
             })

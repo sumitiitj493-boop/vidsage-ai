@@ -68,7 +68,7 @@ export default function NotesView({
   return (
     <main className="rounded-2xl border border-white/10 bg-slate-900/50 p-6 backdrop-blur-2xl shadow-xl shadow-black/30">
       <div className="rounded-2xl bg-gradient-to-r from-[#0d1117] via-[#161b22] to-[#1a1f29] border-l-4 border-purple-400 p-6 shadow-lg shadow-purple-500/10 mb-6">
-        <h2 className="text-2xl font-semibold text-white">🚀 Masterclass Notes</h2>
+        <h2 className="text-2xl font-semibold text-white">Masterclass Notes</h2>
         <p className="mt-2 text-sm text-purple-200 opacity-80">AI-generated smart notes. Extracted directly from your content.</p>
       </div>
 

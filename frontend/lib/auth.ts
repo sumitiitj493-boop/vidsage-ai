@@ -186,6 +186,13 @@ export async function loginWithPassword(username: string, password: string): Pro
   return data as LoginResult;
 }
 
+export function beginGoogleLogin(nextPath = "/dashboard") {
+  if (typeof window === "undefined") return;
+  const url = new URL(`${getApiBase()}/api/auth/google`);
+  url.searchParams.set("next", nextPath);
+  window.location.href = url.toString();
+}
+
 export async function authFetch(input: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers || {});
   const token = getAuthToken();

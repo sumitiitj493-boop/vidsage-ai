@@ -1,6 +1,11 @@
 """
-VidSage Configuration
+VidSage Configuration — Production Hardened
 Loads settings from .env file
+
+Changes from original:
+- Added PROXY_LIST for YouTube proxy rotation
+- Added YT_COOKIE_FILE for authenticated YouTube access
+- Added PROXY settings
 """
 
 import os
@@ -12,6 +17,7 @@ def _as_bool(value: str | None, default: bool = False) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
 
 # Load .env from backend directory
 env_path = Path(__file__).parent.parent / ".env"
@@ -36,7 +42,7 @@ class Settings:
 
     # Cleaning settings
     CLEANING_MODEL: str = os.getenv("CLEANING_MODEL", "llama-3.1-8b-instant")
-    MAX_CHUNK_SIZE: int = 2500  # characters per LLM chunk (reduced slightly for rate limits)
+    MAX_CHUNK_SIZE: int = 2500
 
     # Fallback LLM (OpenRouter / OpenAI-compatible)
     OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
@@ -45,11 +51,18 @@ class Settings:
     OPENROUTER_TIMEOUT: int = int(os.getenv("OPENROUTER_TIMEOUT", "120"))
 
     # RAG Settings
-    # Use absolute path for ChromaDB to avoid CWD issues
-    CHROMA_DB_DIR: str = str(Path(__file__).parent.parent / "chroma_db") 
+    CHROMA_DB_DIR: str = str(Path(__file__).parent.parent / "chroma_db")
 
     # Redis connection used by Celery and job manager
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+
+    # ── NEW: Proxy & YouTube Settings ─────────────────────
+    # Comma-separated proxy URLs for YouTube rotation
+    PROXY_LIST: str = os.getenv("PROXY_LIST", "")
+    # Path to cookies.txt for authenticated YouTube access
+    YT_COOKIE_FILE: str = os.getenv("YT_COOKIE_FILE", "")
+    # Minimum seconds between YouTube requests (bot detection prevention)
+    YT_REQUEST_INTERVAL: float = float(os.getenv("YT_REQUEST_INTERVAL", "3.0"))
 
     # Authentication Settings
     AUTH_ENABLED: bool = _as_bool(os.getenv("AUTH_ENABLED"), True)
@@ -71,5 +84,14 @@ class Settings:
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(
         os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", str(AUTH_ACCESS_TOKEN_EXPIRE_MINUTES))
     )
+
+    # Frontend / OAuth
+    FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:3000")
+    GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "")
+    GOOGLE_CLIENT_SECRET: str = os.getenv("GOOGLE_CLIENT_SECRET", "")
+    GOOGLE_REDIRECT_URI: str = os.getenv("GOOGLE_REDIRECT_URI", "")
+    GOOGLE_OAUTH_STATE_COOKIE_NAME: str = os.getenv("GOOGLE_OAUTH_STATE_COOKIE_NAME", "vidsage_google_oauth_state")
+    GOOGLE_OAUTH_NEXT_COOKIE_NAME: str = os.getenv("GOOGLE_OAUTH_NEXT_COOKIE_NAME", "vidsage_google_oauth_next")
+
 
 settings = Settings()
