@@ -1,4 +1,4 @@
-import ssl
+content = """import ssl
 import os
 from celery import Celery
 
@@ -32,3 +32,6 @@ celery.conf.update(
 
 celery.autodiscover_tasks(["app.tasks"])
 celery.conf.imports = ["app.tasks.transcription_tasks"]
+"""
+with open('backend/app/celery_app.py', 'w', encoding='utf-8') as f:
+    f.write(content)
