@@ -167,14 +167,9 @@ async def health_detailed():
     except Exception as e:
         checks["redis"] = f"unhealthy: {str(e)[:100]}"
 
-    # Check ChromaDB
-    try:
-        import chromadb
-        client = chromadb.PersistentClient(path=settings.CHROMA_DB_DIR)
-        client.heartbeat()
-        checks["chromadb"] = "healthy"
-    except Exception as e:
-        checks["chromadb"] = f"unhealthy: {str(e)[:100]}"
+    # ChromaDB removed for lightweight deployment
+    checks["chromadb"] = "removed_for_lite"
+
 
     all_healthy = all("healthy" in v for v in checks.values())
     return {

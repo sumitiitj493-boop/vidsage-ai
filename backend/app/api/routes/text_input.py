@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 import time
 import uuid
 import logging
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+
 from app.models.text_models import TextRequest
 from app.services.transcript_cleaner import TranscriptCleaner
 from app.services.transcript_quality_checker import TranscriptQualityChecker
@@ -46,13 +46,10 @@ async def process_text(request: TextRequest):
         )
         
         # 3. Create Segments (Split large text into small chunks for RAG)
-        # We mimic video segments by splitting text into meaningful chunks
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=300,      # Smaller characters per "segment"
-            chunk_overlap=30,    # Small overlap
-            separators=["\n\n", "\n", ". ", " ", ""]
-        )
-        text_chunks = splitter.split_text(cleaned["cleaned_text"])
+        # We mimic video segments by splitting text into meaningful chunks manually
+        def chunk_text(text, max_len=300):
+            return [text[i:i+max_len] for i in range(0, len(text), max_len)]
+        text_chunks = chunk_text(cleaned["cleaned_text"], max_len=300)
         
         segments = []
         for chunk in text_chunks:
