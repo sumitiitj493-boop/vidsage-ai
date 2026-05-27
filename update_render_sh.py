@@ -1,4 +1,4 @@
-#!/bin/bash
+content = """#!/bin/bash
 set -e
 
 echo "🚀 VidSage starting on Render..."
@@ -22,3 +22,6 @@ fi
 # Start FastAPI — THIS is the main process
 echo "🌐 Starting FastAPI on port ${PORT:-10000}..."
 exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-10000} --workers 1 --timeout-keep-alive 120
+"""
+with open('backend/render-start.sh', 'w', encoding='utf-8', newline='\n') as f:
+    f.write(content)
