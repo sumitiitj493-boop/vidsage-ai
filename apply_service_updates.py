@@ -1,4 +1,4 @@
-"""
+content = '''"""
 VidSage — Groq Whisper API Transcription Service
 
 Uses Groq's free Whisper API instead of local faster-whisper.
@@ -182,3 +182,9 @@ class TranscriptionService:
 
 # Singleton (used by deps.py)
 transcription_service = TranscriptionService()
+'''
+
+with open('backend/app/services/transcription_service.py', 'w', encoding='utf-8') as f:
+    f.write(content)
+
+print("TranscriptionService updated with the correct constructor signature and class name.")
