@@ -108,8 +108,7 @@ class RAGService:
         for chunk in best_chunks:
             start_str = self._format_timestamp(chunk["start"])
             end_str = self._format_timestamp(chunk["end"])
-            context_pieces.append(f"[Time: {start_str}-{end_str}]
-{chunk['text']}")
+            context_pieces.append(f"[Time: {start_str}-{end_str}]\n{chunk['text']}")
             
         context = "
 
@@ -146,8 +145,7 @@ ANSWER:"
         for chunk in best_chunks:
             start_str = self._format_timestamp(chunk["start"])
             end_str = self._format_timestamp(chunk["end"])
-            context_pieces.append(f"[Time: {start_str}-{end_str}]
-{chunk['text']}")
+            context_pieces.append(f"[Time: {start_str}-{end_str}]\n{chunk['text']}")
             
         context = "
 
