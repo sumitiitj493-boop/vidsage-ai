@@ -19,10 +19,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Install Python dependencies (excluding heavy ML libs we don't need)
-COPY requirements.render.txt requirements.txt
+# Install Python dependencies
+COPY requirements.txt .
 
-# Install only what's needed — faster-whisper is kept for fallback
+# Install dependencies (faster-whisper is kept for fallback
 # but Groq API will be primary for free tier
 RUN pip install --no-cache-dir -r requirements.txt \
     gunicorn>=21.2.0 \
