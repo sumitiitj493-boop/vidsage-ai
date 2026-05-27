@@ -1,4 +1,4 @@
-import json
+content = """import json
 import logging
 import os
 import re
@@ -108,18 +108,10 @@ class RAGService:
         for chunk in best_chunks:
             start_str = self._format_timestamp(chunk["start"])
             end_str = self._format_timestamp(chunk["end"])
-            context_pieces.append(f"[Time: {start_str}-{end_str}]
-{chunk['text']}")
+            context_pieces.append(f"[Time: {start_str}-{end_str}]\n{chunk['text']}")
             
-        context = "
-
-".join(context_pieces)
-        prompt = f"You are an AI Tutor.
-CONTEXT:
-{context}
-
-QUESTION: {question}
-ANSWER:"
+        context = "\n\n".join(context_pieces)
+        prompt = f"You are an AI Tutor.\nCONTEXT:\n{context}\n\nQUESTION: {question}\nANSWER:"
 
         try:
             response = self.groq_client.chat.completions.create(
@@ -146,18 +138,10 @@ ANSWER:"
         for chunk in best_chunks:
             start_str = self._format_timestamp(chunk["start"])
             end_str = self._format_timestamp(chunk["end"])
-            context_pieces.append(f"[Time: {start_str}-{end_str}]
-{chunk['text']}")
+            context_pieces.append(f"[Time: {start_str}-{end_str}]\n{chunk['text']}")
             
-        context = "
-
-".join(context_pieces)
-        prompt = f"You are an AI Tutor.
-CONTEXT:
-{context}
-
-QUESTION: {question}
-ANSWER:"
+        context = "\n\n".join(context_pieces)
+        prompt = f"You are an AI Tutor.\nCONTEXT:\n{context}\n\nQUESTION: {question}\nANSWER:"
 
         try:
             self._ensure_runtime()
@@ -182,7 +166,7 @@ ANSWER:"
             chunks = json.load(f)
             
         text_sample = " ".join([c["text"] for c in chunks[:50]])
-        prompt = f"""You are an AI Summarizer. Please summarize this video text snippet into JSON.
+        prompt = f\"\"\"You are an AI Summarizer. Please summarize this video text snippet into JSON.
 Return ONLY valid JSON.
 {{
   "video_type": "<type>",
@@ -192,7 +176,7 @@ Return ONLY valid JSON.
   "terms": []
 }}
 TEXT:
-{text_sample}"""
+{text_sample}\"\"\"
 
         try:
             self._ensure_runtime()
@@ -210,3 +194,6 @@ TEXT:
             return {"error": str(e)}
 
 rag_service = RAGService()
+"""
+with open('backend/app/services/rag_service.py', 'w', encoding='utf-8') as f:
+    f.write(content)
