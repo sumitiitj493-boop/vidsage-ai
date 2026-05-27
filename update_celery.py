@@ -1,4 +1,4 @@
-import ssl
+content = """import ssl
 from celery import Celery
 from kombu import Queue
 
@@ -36,3 +36,7 @@ celery.conf.update(
 
 celery.autodiscover_tasks(["app.tasks"])
 celery.conf.imports = ["app.tasks.transcription_tasks"]
+"""
+
+with open('backend/app/celery_app.py', 'w', encoding='utf-8') as f:
+    f.write(content)
