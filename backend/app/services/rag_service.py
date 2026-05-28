@@ -44,6 +44,16 @@ class RAGService:
     def _get_db_path(self, video_id: str) -> str:
         return os.path.join(self.db_dir, f"video_{video_id}_lite.json")
 
+    @staticmethod
+    def _default_questions() -> list[str]:
+        return [
+            "Summarize this content.",
+            "What are the key points?",
+            "Explain the main concept simply.",
+            "What should I revise from this?",
+            "Create short notes from this content.",
+        ]
+
     def index_video(self, video_id: str, segments: list[dict]):
         logger.info(f"Indexing video {video_id} for RAG (Lite Mode)...")
         
@@ -195,5 +205,107 @@ TEXT:
         except Exception as e:
             logger.error(f"Error generating summary: {e}")
             return {"error": str(e)}
+
+    def generate_suggested_questions(self, video_id: str) -> list[str]:
+        """Generate study prompts from indexed content with safe fallbacks."""
+        db_path = self._get_db_path(video_id)
+
+        if not os.path.exists(db_path):
+            return self._default_questions()
+
+        try:
+            with open(db_path, "r", encoding="utf-8") as f:
+                chunks = json.load(f)
+
+            text_sample = " ".join([c.get("text", "") for c in chunks[:10]])[:3000]
+            if not text_sample.strip():
+                return self._default_questions()
+
+            self._ensure_runtime()
+            if not self.groq_client:
+                return self._default_questions()
+
+            prompt = (
+                "Based on this content, generate exactly 5 useful study questions. "
+                "Return only a JSON array of strings.\n\n"
+                f"CONTENT:\n{text_sample}"
+            )
+
+            response = self.groq_client.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model="llama-3.1-8b-instant",
+                temperature=0.3,
+            )
+
+            raw = (response.choices[0].message.content or "").strip()
+            try:
+                questions = json.loads(raw)
+                if isinstance(questions, list) and questions:
+                    return [str(q) for q in questions[:5]]
+            except Exception:
+                pass
+
+            return self._default_questions()
+        except Exception as e:
+            logger.error(f"Suggested questions generation failed for {video_id}: {e}")
+            return self._default_questions()
+
+    def generate_mindmap(self, video_id: str) -> str:
+        """Generate Mermaid mindmap with a lightweight fallback."""
+        db_path = self._get_db_path(video_id)
+
+        if not os.path.exists(db_path):
+            return (
+                "mindmap\n"
+                "  root((VidSage))\n"
+                "    No indexed content found\n"
+                "    Process a PDF, text, or video first\n"
+            )
+
+        try:
+            with open(db_path, "r", encoding="utf-8") as f:
+                chunks = json.load(f)
+
+            text_sample = " ".join([c.get("text", "") for c in chunks[:15]])[:4000]
+            self._ensure_runtime()
+
+            if not self.groq_client:
+                return (
+                    "mindmap\n"
+                    "  root((Content))\n"
+                    "    Summary\n"
+                    "    Key Points\n"
+                    "    Important Terms\n"
+                    "    Revision Notes\n"
+                )
+
+            prompt = (
+                "Create a Mermaid mindmap from this content. Return only valid Mermaid mindmap code. "
+                "Do not use markdown fences.\n\n"
+                f"CONTENT:\n{text_sample}"
+            )
+
+            response = self.groq_client.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model="llama-3.1-8b-instant",
+                temperature=0.2,
+            )
+
+            mermaid = (response.choices[0].message.content or "").strip()
+            mermaid = mermaid.replace("```mermaid", "").replace("```", "").strip()
+
+            if not mermaid.startswith("mindmap"):
+                mermaid = "mindmap\n  root((Content))\n    " + mermaid.replace("\n", "\n    ")
+
+            return mermaid
+        except Exception as e:
+            logger.error(f"Mindmap generation failed for {video_id}: {e}")
+            return (
+                "mindmap\n"
+                "  root((Content))\n"
+                "    Summary\n"
+                "    Key Points\n"
+                "    Revision Notes\n"
+            )
 
 rag_service = RAGService()

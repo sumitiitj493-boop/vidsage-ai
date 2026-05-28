@@ -97,11 +97,14 @@ from app.middleware.request_logger import RequestLoggingMiddleware
 app.add_middleware(RequestLoggingMiddleware)
 
 # 4. Rate limiting (outermost — catches everything first)
-from app.middleware.rate_limiter import RateLimitMiddleware
-app.add_middleware(
-    RateLimitMiddleware,
-    redis_url=settings.REDIS_URL,
-)
+if settings.ENVIRONMENT == "production":
+    from app.middleware.rate_limiter import RateLimitMiddleware
+    app.add_middleware(
+        RateLimitMiddleware,
+        redis_url=settings.REDIS_URL,
+    )
+else:
+    logger.info("Rate limiter disabled in development")
 
 # ── Routes ────────────────────────────────────────────────────
 app.include_router(auth.router)

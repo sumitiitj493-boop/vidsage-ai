@@ -13,9 +13,49 @@ Groq free tier:
 
 import logging
 import os
+from dataclasses import dataclass
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class TranscriptSegment:
+    start: float
+    end: float
+    text: str
+
+    def __getitem__(self, item):
+        return getattr(self, item)
+
+    def get(self, item, default=None):
+        return getattr(self, item, default)
+
+
+@dataclass
+class TranscriptionResult:
+    text: str
+    segments: list
+    language: str
+    duration: float = 0.0
+    engine: str = "none"
+    error: str | None = None
+
+    def __getitem__(self, item):
+        return getattr(self, item)
+
+    def get(self, item, default=None):
+        return getattr(self, item, default)
+
+    def to_dict(self) -> dict:
+        return {
+            "text": self.text,
+            "segments": self.segments,
+            "language": self.language,
+            "duration": self.duration,
+            "engine": self.engine,
+            "error": self.error,
+        }
 
 
 class TranscriptionService:
@@ -84,17 +124,36 @@ class TranscriptionService:
         self,
         audio_path: str,
         language: Optional[str] = None,
-    ) -> dict:
+        progress_callback=None,
+        force_accuracy: bool = False,
+        english_only: bool = False,
+        translate_to_english: bool = False,
+        **kwargs,
+    ) -> TranscriptionResult:
         """
         Transcribe audio file. Returns dict with segments and full text.
         Tries Groq API first, falls back to local Whisper.
         """
+        if progress_callback:
+            try:
+                progress_callback(0)
+            except Exception:
+                pass
+
+        if translate_to_english and not language:
+            language = "en"
+
         # Try Groq first (cloud, fast, low memory)
         self._init_groq()
         if self._groq_available:
             try:
                 result = self._transcribe_groq(audio_path, language)
-                result["engine"] = "groq_api"
+                result.engine = "groq_api"
+                if progress_callback:
+                    try:
+                        progress_callback(100)
+                    except Exception:
+                        pass
                 return result
             except Exception as e:
                 logger.warning(f"Groq transcription failed, trying local: {e}")
@@ -104,20 +163,31 @@ class TranscriptionService:
         if self._local_whisper_available:
             try:
                 result = self._transcribe_local(audio_path, language)
-                result["engine"] = "local_whisper"
+                result.engine = "local_whisper"
+                if progress_callback:
+                    try:
+                        progress_callback(100)
+                    except Exception:
+                        pass
                 return result
             except Exception as e:
                 logger.error(f"Local Whisper also failed: {e}")
 
-        return {
-            "text": "",
-            "segments": [],
-            "language": language or "unknown",
-            "engine": "none",
-            "error": "Both Groq API and local Whisper failed",
-        }
+        if progress_callback:
+            try:
+                progress_callback(100)
+            except Exception:
+                pass
 
-    def _transcribe_groq(self, audio_path: str, language: Optional[str]) -> dict:
+        return TranscriptionResult(
+            text="",
+            segments=[],
+            language=language or "unknown",
+            engine="none",
+            error="Both Groq API and local Whisper failed",
+        )
+
+    def _transcribe_groq(self, audio_path: str, language: Optional[str]) -> TranscriptionResult:
         """Transcribe using Groq's Whisper API."""
         filename = os.path.basename(audio_path)
 
@@ -134,27 +204,32 @@ class TranscriptionService:
             response = self._groq_client.audio.transcriptions.create(**kwargs)
 
         # Parse response
-        segments = []
+        segments: list[TranscriptSegment] = []
         if hasattr(response, "segments") and response.segments:
             for seg in response.segments:
-                segments.append({
-                    "start": seg.get("start", 0) if isinstance(seg, dict) else getattr(seg, "start", 0),
-                    "end": seg.get("end", 0) if isinstance(seg, dict) else getattr(seg, "end", 0),
-                    "text": seg.get("text", "") if isinstance(seg, dict) else getattr(seg, "text", ""),
-                })
+                segments.append(
+                    TranscriptSegment(
+                        start=seg.get("start", 0) if isinstance(seg, dict) else getattr(seg, "start", 0),
+                        end=seg.get("end", 0) if isinstance(seg, dict) else getattr(seg, "end", 0),
+                        text=seg.get("text", "") if isinstance(seg, dict) else getattr(seg, "text", ""),
+                    )
+                )
 
         text = response.text if hasattr(response, "text") else str(response)
         lang = getattr(response, "language", language or "unknown")
 
         logger.info(f"Groq transcription complete: {len(text)} chars, {len(segments)} segments")
 
-        return {
-            "text": text,
-            "segments": segments,
-            "language": lang,
-        }
+        duration = float(segments[-1].end) if segments else 0.0
 
-    def _transcribe_local(self, audio_path: str, language: Optional[str]) -> dict:
+        return TranscriptionResult(
+            text=text,
+            segments=segments,
+            language=lang,
+            duration=duration,
+        )
+
+    def _transcribe_local(self, audio_path: str, language: Optional[str]) -> TranscriptionResult:
         """Transcribe using local faster-whisper (fallback)."""
         kwargs = {}
         if language:
@@ -162,22 +237,27 @@ class TranscriptionService:
 
         segments_iter, info = self._model.transcribe(audio_path, **kwargs)
 
-        segments = []
+        segments: list[TranscriptSegment] = []
         for seg in segments_iter:
-            segments.append({
-                "start": seg.start,
-                "end": seg.end,
-                "text": seg.text,
-            })
+            segments.append(
+                TranscriptSegment(
+                    start=seg.start,
+                    end=seg.end,
+                    text=seg.text,
+                )
+            )
 
         text = " ".join(s["text"] for s in segments)
         logger.info(f"Local transcription complete: {len(text)} chars, {len(segments)} segments")
 
-        return {
-            "text": text,
-            "segments": segments,
-            "language": info.language if hasattr(info, "language") else (language or "unknown"),
-        }
+        duration = float(segments[-1].end) if segments else 0.0
+
+        return TranscriptionResult(
+            text=text,
+            segments=segments,
+            language=info.language if hasattr(info, "language") else (language or "unknown"),
+            duration=duration,
+        )
 
 
 # Singleton (used by deps.py)
