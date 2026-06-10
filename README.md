@@ -74,59 +74,114 @@ The system is built for reliability and scale — with a multi-service Docker ar
 
 ## Architecture
 
+```mermaid
+graph TD
+    Client["Browser"]
+
+    subgraph CDN["Vercel (Free)"]
+        Frontend["Next.js Frontend<br/>React 18 + TypeScript<br/>Tailwind CSS + KaTeX + Mermaid.js"]
+    end
+
+    subgraph Proxy["Nginx"]
+        Nginx["Reverse Proxy<br/>Rate Limiting<br/>Security Headers<br/>SSL Termination"]
+    end
+
+    subgraph API["Render / Docker"]
+        FastAPI["FastAPI Backend<br/>Port 8000/10000"]
+
+        subgraph Routes["API Routes"]
+            Auth["Auth (JWT + Google OAuth)"]
+            Video["Video Processing"]
+            Upload["Audio Upload"]
+            Chat["Chat (RAG)"]
+            Notes["Notes & Quizzes"]
+            PDF["PDF Operations"]
+            Text["Text Processing"]
+        end
+
+        subgraph MW["Middleware"]
+            RL["Rate Limiter (Redis)"]
+            SH["Security Headers"]
+            Log["Request Logger"]
+        end
+
+        subgraph Svc["Services"]
+            GroqW["Groq Whisper API"]
+            GroqLLM["Groq LLM (LLaMA 3.3 70B)"]
+            RAG["RAG Service (BM25 + JSON)"]
+            YT["YouTube Transcript API"]
+            YTDLP["yt-dlp Downloader"]
+            ProxyMgr["Proxy Manager"]
+            Cleaner["Transcript Cleaner (3-Layer)"]
+            QC["Quality Checker (LLM)"]
+            FFmpeg["Audio Preprocessor (FFmpeg)"]
+            PDFSvc["PDF Service (PyPDF)"]
+            UserDB["User Store (SQLite)"]
+        end
+    end
+
+    subgraph Data["Data Layer"]
+        Redis["Redis 7<br/>Job Queue + Rate Limit"]
+        Celery["Celery Workers<br/>Transcription + RAG Indexing"]
+        Files["File Storage<br/>Downloads + Uploads + ChromaDB"]
+    end
+
+    Client --> Frontend
+    Frontend --> Nginx
+    Nginx --> FastAPI
+    FastAPI --> Routes
+    FastAPI --> MW
+    FastAPI --> Svc
+    FastAPI --> Redis
+    FastAPI --> Celery
+    FastAPI --> Files
+    Celery --> Redis
+    Celery --> Files
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                          Nginx (Reverse Proxy)                       │
-│              Rate Limiting · Security Headers · SSL Termination       │
-│                          Port 80/443                                 │
-└──────────┬──────────────────────────────────────┬───────────────────┘
-           │                                      │
-           ▼                                      ▼
-┌──────────────────────┐            ┌─────────────────────────────────┐
-│   Frontend (Next.js)  │            │       Backend (FastAPI)          │
-│   Port 3000           │            │       Port 8000/10000            │
-│                       │            │                                  │
-│  · React 18           │            │  ┌─ API Routes ──────────────┐  │
-│  · TypeScript         │            │  │ Auth (JWT + Google OAuth) │  │
-│  · Tailwind CSS       │            │  │ Video Processing          │  │
-│  · Mermaid.js         │            │  │ Audio Upload              │  │
-│  · KaTeX Math         │            │  │ Chat (RAG)                │  │
-│  · React Markdown     │            │  │ Notes & Quizzes           │  │
-│  · Vercel Deployment  │            │  │ PDF Operations            │  │
-│                       │            │  │ Text Processing           │  │
-└──────────────────────┘            │  └──────────────────────────┘  │
-                                     │                                  │
-                                     │  ┌─ Middleware ──────────────┐  │
-                                     │  │ Rate Limiter (Redis)      │  │
-                                     │  │ Security Headers          │  │
-                                     │  │ Request Logger            │  │
-                                     │  └──────────────────────────┘  │
-                                     │                                  │
-                                     │  ┌─ Services ───────────────┐  │
-                                     │  │ Groq Whisper API          │  │
-                                     │  │ Groq LLM (LLaMA 3.3 70B) │  │
-                                     │  │ RAG Service (BM25 + JSON) │  │
-                                     │  │ YouTube Transcript API    │  │
-                                     │  │ yt-dlp Downloader         │  │
-                                     │  │ Proxy Manager             │  │
-                                     │  │ Transcript Cleaner (3-L)  │  │
-                                     │  │ Quality Checker (LLM)     │  │
-                                     │  │ Audio Preprocessor (FFmpeg│  │
-                                     │  │ PDF Service (PyPDF)       │  │
-                                     │  │ User Store (SQLite)       │  │
-                                     │  └──────────────────────────┘  │
-                                     └──────────┬──────────────────────┘
-                                                │
-                           ┌────────────────────┼────────────────────┐
-                           │                    │                    │
-                           ▼                    ▼                    ▼
-                  ┌──────────────┐    ┌────────────────┐   ┌──────────────┐
-                  │ Redis 7      │    │ Celery Workers  │   │ File Storage  │
-                  │ (Job Queue,  │    │ (Transcription, │   │ (Downloads,   │
-                  │  Rate Limit, │    │  RAG Indexing)  │   │  Uploads,     │
-                  │  Sessions)   │    │                  │   │  ChromaDB)    │
-                  └──────────────┘    └────────────────┘   └──────────────┘
+
+<details>
+<summary>Text version (if Mermaid doesn't render)</summary>
+
 ```
+                          Nginx (Reverse Proxy)
+                     Rate Limiting | Security Headers | SSL
+                              |
+              +---------------+---------------+
+              |                               |
+     Frontend (Next.js)              Backend (FastAPI)
+         Port 3000                   Port 8000/10000
+      React 18                  +---- API Routes ----+
+      TypeScript                | Auth (JWT+OAuth)   |
+      Tailwind CSS              | Video Processing   |
+      KaTeX + Mermaid.js        | Audio Upload       |
+                                 | Chat (RAG)         |
+                                 | Notes & Quizzes    |
+                                 | PDF / Text         |
+                                 +--------------------+
+                                 +---- Middleware ----+
+                                 | Rate Limiter       |
+                                 | Security Headers   |
+                                 | Request Logger     |
+                                 +--------------------+
+                                 +---- Services ------+
+                                 | Groq Whisper API   |
+                                 | Groq LLM (70B)     |
+                                 | RAG (BM25 + JSON)  |
+                                 | YouTube API        |
+                                 | yt-dlp             |
+                                 | Proxy Manager      |
+                                 | Transcript Cleaner |
+                                 | Quality Checker    |
+                                 | FFmpeg Preproc.    |
+                                 +--------------------+
+                                          |
+                     +--------------------+--------------------+
+                     |                    |                    |
+                  Redis 7          Celery Workers       File Storage
+               Job Queue          Transcription       Downloads/Uploads
+              Rate Limit           RAG Indexing          ChromaDB
+```
+</details>
 
 ---
 
@@ -184,50 +239,38 @@ The system is built for reliability and scale — with a multi-service Docker ar
 
 ### Transcription Pipeline (Multi-Source Fallback)
 
-```
-Input (YouTube URL / Audio File / PDF / Text)
-         │
-         ▼
-┌─────────────────────┐
-│ Source Detection     │
-└────────┬────────────┘
-         │
-    ┌────┴─────┬──────────────┬──────────────┐
-    ▼          ▼              ▼              ▼
- YouTube    Audio File       PDF           Text
-    │          │              │              │
-    ▼          │              ▼              ▼
-┌──────────┐   │     PyPDF Extraction   Text Chunking
-│ Strategy │   │              │              │
-│ Router   │   │              └──────┬───────┘
-└────┬─────┘   │                     │
-     │         │                     ▼
-     ▼         │           ┌──────────────────┐
-1. YouTube     │           │ Quality Check     │
-   Transcript  │           │ (Groq LLM)        │
-   API ──────► │           │ Topic coherence   │
-     │  fail   │           │ validation        │
-     ▼         │           └────────┬─────────┘
-2. Groq        │                    │
-   Whisper  ◄──┘                    ▼
-   API ──────►│            ┌──────────────────┐
-     │  fail   │           │ 3-Layer Cleaning  │
-     ▼         │           │ 1. Regex (fillers)│
-3. Local       │           │ 2. Dictionary     │
-   faster-     │           │ 3. LLM (Groq)     │
-   whisper ───►│           └────────┬─────────┘
-     │         │                    │
-     ▼         ▼                    ▼
-┌──────────────────────────────────────────┐
-│           RAG Indexing                    │
-│  Segment chunking (500 chars) + BM25     │
-│  JSON storage with timestamps            │
-└──────────────────────────────────────────┘
-         │
-         ▼
-┌──────────────────────────────────────────┐
-│         Ready for Chat / Notes / Quiz    │
-└──────────────────────────────────────────┘
+```mermaid
+graph TD
+    Input["Input: YouTube URL / Audio / PDF / Text"]
+
+    subgraph YouTube["YouTube Path"]
+        S1["1. YouTube Transcript API"] -->|fail| S2["2. Groq Whisper API"]
+        S2 -->|fail| S3["3. Local faster-whisper"]
+    end
+
+    subgraph Direct["Direct Path"]
+        Audio["Audio File --> FFmpeg Preprocess"]
+        PDF["PDF --> PyPDF Extraction"]
+        Text["Text --> Chunking"]
+    end
+
+    subgraph Processing["Processing"]
+        QC["Quality Check (Groq LLM)"]
+        Clean["3-Layer Cleaning<br/>1. Regex (fillers)<br/>2. Dictionary<br/>3. LLM (Groq)"]
+        Index["RAG Indexing<br/>500-char chunks + BM25"]
+    end
+
+    Ready["Ready: Chat / Notes / Quiz / Mind Map"]
+
+    Input --> YouTube
+    Input --> Direct
+    YouTube --> Clean
+    Audio --> Clean
+    PDF --> QC
+    Text --> QC
+    QC --> Clean
+    Clean --> Index
+    Index --> Ready
 ```
 
 ### Transcript Cleaning — 3-Layer Pipeline
@@ -569,10 +612,11 @@ VidSage supports two modes of background processing:
 
 ### Mode 1: Celery + Redis (Production)
 
-```
-FastAPI  ──enqueue──►  Redis  ──consume──►  Celery Worker
-   │                                            │
-   └── poll /api/audio/status/{job_id} ◄────────┘
+```mermaid
+graph LR
+    FastAPI -- enqueue --> Redis -- consume --> Worker["Celery Worker"]
+    Worker -- update status --> Redis
+    FastAPI -- poll status --> Redis
 ```
 
 - Jobs are shared between API server and workers via Redis
@@ -581,10 +625,11 @@ FastAPI  ──enqueue──►  Redis  ──consume──►  Celery Worker
 
 ### Mode 2: FastAPI BackgroundTasks (Development / Single Process)
 
-```
-FastAPI  ──spawn──►  BackgroundTask (same process)
-   │                        │
-   └── poll /api/audio/status/{job_id} ◄──┘
+```mermaid
+graph LR
+    FastAPI -- spawn --> BG["BackgroundTask<br/>(same process)"]
+    BG -- update status --> Store["In-Memory Store"]
+    FastAPI -- poll status --> Store
 ```
 
 - Zero external dependencies (no Redis needed)
@@ -629,7 +674,7 @@ Exports metrics from FastAPI, Redis, Nginx, and Celery for visualization in Graf
 All backend services use structured logging with consistent format:
 
 ```
-2025-05-22 16:14:34 | INFO     | app.services.rag_service   | Indexing video abc123 for RAG...
+2025-05-22 16:14:34 INFO app.services.rag_service Indexing video abc123 for RAG...
 ```
 
 ---
