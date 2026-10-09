@@ -1,3 +1,20 @@
+
+<h1 align="center">🎬 Vidsage-AI Demo</h1>
+
+<p align="center">
+  <a href="https://drive.google.com/file/d/1VQ-npQx6fzJmTvrUibSstr3H-WWvwwzB/view">
+    <img src="https://drive.google.com/thumbnail?id=1VQ-npQx6fzJmTvrUibSstr3H-WWvwwzB&sz=w1200" alt="Vidsage-AI Demo Video" width="800" />
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://drive.google.com/file/d/1VQ-npQx6fzJmTvrUibSstr3H-WWvwwzB/view">
+    <img src="https://img.shields.io/badge/▶_Watch_Project_Demo-Click_Here-red?style=for-the-badge" alt="Watch Project Demo" />
+  </a>
+</p>
+
+---
+
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.11-3776AB?style=for-the-badge&logo=python&logoColor=white" />
   <img src="https://img.shields.io/badge/FastAPI-0.109+-009688?style=for-the-badge&logo=fastapi&logoColor=white" />
